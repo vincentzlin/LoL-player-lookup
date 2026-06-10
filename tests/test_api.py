@@ -50,6 +50,7 @@ def test_overall_metrics(client):
     assert o["kills"] == 2.25            # (4+3+2+0)/4
     assert o["deaths"] == 1.5            # (2+1+3+0)/4
     assert o["assists"] == 7.25          # (6+8+5+10)/4
+    assert o["kda"] == 6.333             # aggregate (9+29)/6
     assert o["cspm"] == 8.5
     assert o["gpm"] == 400.0             # 12000 / (1800/60)
     assert o["dpm"] == 500.0

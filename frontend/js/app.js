@@ -4,6 +4,7 @@ const METRICS = [
   { key: 'kills',    label: 'Kills / game',     dir: +1, dp: 1 },
   { key: 'deaths',   label: 'Deaths / game',    dir: -1, dp: 1 },
   { key: 'assists',  label: 'Assists / game',   dir: +1, dp: 1 },
+  { key: 'kda',      label: 'KDA',              dir: +1, dp: 2 },
   { key: 'cspm',     label: 'CS / min',         dir: +1, dp: 2 },
   { key: 'gpm',      label: 'Gold / min',       dir: +1, dp: 0 },
   { key: 'dpm',      label: 'Damage / min',     dir: +1, dp: 0 },

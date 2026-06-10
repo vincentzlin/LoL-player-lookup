@@ -23,11 +23,18 @@ def metrics_from_rows(rows: list[PlayerGameStat]) -> dict:
             return None
         return r.totalgold / (r.gamelength_s / 60.0)
 
+    # KDA is an aggregate ratio of sums (standard esports convention), not an
+    # average of per-game ratios — this handles deathless games naturally.
+    total_d = sum(r.deaths or 0 for r in rows)
+    total_ka = sum((r.kills or 0) + (r.assists or 0) for r in rows)
+    kda = round(total_ka / total_d, 3) if total_d else round(float(total_ka), 3)
+
     return {
         "games": len(rows),
         "kills": _avg([r.kills for r in rows]),
         "deaths": _avg([r.deaths for r in rows]),
         "assists": _avg([r.assists for r in rows]),
+        "kda": kda,
         "cspm": _avg([r.cspm for r in rows]),
         "gpm": _avg([gpm(r) for r in rows]),
         "dpm": _avg([r.dpm for r in rows]),
@@ -38,7 +45,7 @@ def metrics_from_rows(rows: list[PlayerGameStat]) -> dict:
     }
 
 
-METRIC_KEYS = ["kills", "deaths", "assists", "cspm", "gpm", "dpm",
+METRIC_KEYS = ["kills", "deaths", "assists", "kda", "cspm", "gpm", "dpm",
                "gold_pct", "dmg_pct", "csd15", "gd15"]
 
 
