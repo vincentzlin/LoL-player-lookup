@@ -14,6 +14,7 @@ class Metrics(BaseModel):
     kills: float | None = None
     deaths: float | None = None
     assists: float | None = None
+    kda: float | None = None
     cspm: float | None = None
     gpm: float | None = None
     dpm: float | None = None
