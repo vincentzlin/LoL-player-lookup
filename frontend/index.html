@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LCK Pro Player Stats</title>
+  <link rel="stylesheet" href="/static/css/style.css?v=1" />
+</head>
+<body>
+  <header class="header">
+    <div class="header-inner">
+      <div class="logo">
+        <span class="logo-icon">🏆</span>
+        <span class="logo-text">LCK PRO STATS</span>
+        <span class="logo-badge">PRO PLAY</span>
+      </div>
+      <div class="header-actions">
+        <span class="db-status">Teddy · Ruler · Kiin · Zeus</span>
+      </div>
+    </div>
+  </header>
+
+  <main class="main">
+    <!-- Search -->
+    <section class="search-section">
+      <div class="search-wrapper">
+        <label class="picker-label" for="search-input">Search a pro player</label>
+        <div style="display:flex; gap:10px;">
+          <input id="search-input" class="search-input" type="text"
+                 list="player-list" autocomplete="off"
+                 placeholder="Type a name: Teddy, Ruler, Kiin or Zeus" />
+          <datalist id="player-list"></datalist>
+          <button id="search-btn" class="btn btn-primary">Search</button>
+        </div>
+        <div id="search-error" class="search-error hidden"></div>
+        <div id="player-chips" class="quick-chips"></div>
+      </div>
+    </section>
+
+    <!-- Results -->
+    <section id="results" class="view hidden">
+      <button id="back-btn" class="back-btn">← New search</button>
+
+      <div class="detail-hero">
+        <div class="detail-hero-info">
+          <div id="player-name" class="detail-name"></div>
+          <div id="player-meta" class="detail-meta"></div>
+
+          <div class="filter-block">
+            <span class="filter-label">Season</span>
+            <div id="season-row" class="btn-row"></div>
+          </div>
+          <div class="filter-block">
+            <span class="filter-label">Split</span>
+            <div id="split-row" class="btn-row"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Overall vs LCK role baseline -->
+      <div class="detail-section wide">
+        <h3 id="overall-title">Overall — vs LCK role average</h3>
+        <div id="overall-table" class="cmp-wrap"></div>
+      </div>
+
+      <!-- Champion grid -->
+      <div class="detail-section wide">
+        <h3>Champions played <span id="champ-hint" class="hint"></span></h3>
+        <div id="champ-grid" class="champ-img-grid"></div>
+      </div>
+
+      <!-- Per-champion comparison -->
+      <div id="champ-detail" class="detail-section wide hidden">
+        <h3 id="champ-detail-title"></h3>
+        <div id="champ-table" class="cmp-wrap"></div>
+      </div>
+    </section>
+  </main>
+
+  <div id="loading" class="loading-overlay hidden">
+    <div class="spinner"></div>
+    <div id="loading-msg">Loading…</div>
+  </div>
+
+  <script src="/static/js/api.js?v=1"></script>
+  <script src="/static/js/app.js?v=1"></script>
+</body>
+</html>
