@@ -75,8 +75,13 @@ def player_rows(session: Session, name: str, season=None, split=None,
     return q.all()
 
 
-def player_champions(rows: list[PlayerGameStat]) -> list[dict]:
-    """Group a player's rows by champion, with per-champion metrics + image."""
+def player_champions(rows: list[PlayerGameStat],
+                     role_baseline: dict | None = None) -> list[dict]:
+    """Group a player's rows by champion, with per-champion metrics + image.
+
+    When ``role_baseline`` is given, each champion also gets a ``tier`` of
+    ``"top"``/``"bottom"``/``None`` from :func:`champion_tier`.
+    """
     by_champ: dict[str, list[PlayerGameStat]] = {}
     ddragon: dict[str, str] = {}
     for r in rows:
@@ -91,10 +96,72 @@ def player_champions(rows: list[PlayerGameStat]) -> list[dict]:
             "champion": champ,
             "champion_ddragon": ddragon.get(champ) or "",
             "image_url": image_url(champ),
+            "tier": champion_tier(m, role_baseline) if role_baseline else None,
             **m,
         })
     out.sort(key=lambda c: c["games"], reverse=True)
     return out
+
+
+# ── Performance tier & streaks ───────────────────────────────────────────────
+
+# Metrics with a stable, non-zero LCK role baseline and where higher is better.
+# The diff@15 metrics are intentionally excluded: their role average is ~0, so a
+# percentage delta against them is meaningless/unstable.
+COMPOSITE_KEYS = ["kda", "cspm", "gpm", "dpm", "gold_pct", "dmg_pct"]
+
+MIN_TIER_GAMES = 3
+TIER_THRESHOLD_PCT = 15.0
+
+
+def champion_tier(champ_metrics: dict, role_baseline: dict) -> str | None:
+    """Classify a champion as a top/bottom performer vs the LCK role average.
+
+    Returns ``"top"`` if the player's composite %-delta across COMPOSITE_KEYS is
+    >= +15%, ``"bottom"`` if <= -15%, else ``None``. Requires >= 3 games.
+    """
+    if champ_metrics.get("games", 0) < MIN_TIER_GAMES:
+        return None
+    pcts = []
+    for k in COMPOSITE_KEYS:
+        p, b = champ_metrics.get(k), role_baseline.get(k)
+        if p is None or b is None or b == 0:
+            continue
+        pcts.append((p - b) / abs(b) * 100)  # all keys are higher-is-better
+    if not pcts:
+        return None
+    composite = mean(pcts)
+    if composite >= TIER_THRESHOLD_PCT:
+        return "top"
+    if composite <= -TIER_THRESHOLD_PCT:
+        return "bottom"
+    return None
+
+
+STREAK_MIN = 3
+
+
+def current_streak(rows: list[PlayerGameStat]) -> dict | None:
+    """Detect a 3+ game win/loss streak at the most-recent end of ``rows``.
+
+    Rows are ordered by ``(date, gameid)``; rows without a result are skipped.
+    Returns ``{"type": "win"|"loss", "length": n}`` or ``None``.
+    """
+    played = sorted(
+        (r for r in rows if r.result in ("Win", "Loss")),
+        key=lambda r: (r.date or "", r.gameid or ""),
+    )
+    if not played:
+        return None
+    last = played[-1].result
+    length = 0
+    for r in reversed(played):
+        if r.result != last:
+            break
+        length += 1
+    if length < STREAK_MIN:
+        return None
+    return {"type": "win" if last == "Win" else "loss", "length": length}
 
 
 # ── LCK baseline queries ─────────────────────────────────────────────────────

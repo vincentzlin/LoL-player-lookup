@@ -172,9 +172,14 @@ async function loadStats() {
 function renderShell() {
   const d = State.lastStats;
   $('player-name').textContent = State.player;
+  const streakTag = d.streak
+    ? `<span class="streak-badge ${d.streak.type}">` +
+      `${d.streak.length}-${d.streak.type === 'win' ? 'win' : 'loss'} streak</span>`
+    : '';
   $('player-meta').innerHTML =
     `<span class="tag tag-LCK">LCK</span>` +
-    `<span class="tag tag-role">${d.role_label}</span>`;
+    `<span class="tag tag-role">${d.role_label}</span>` +
+    streakTag;
   renderSeasonRow();
   renderSplitRow();
   renderOverall();
@@ -270,10 +275,18 @@ function renderChampGrid() {
   }
   champs.forEach((c) => {
     const card = document.createElement('div');
-    card.className = 'champ-card' + (c.champion === State.champion ? ' active' : '');
+    const tierCls = c.tier === 'top' ? ' tier-top'
+                  : c.tier === 'bottom' ? ' tier-bottom' : '';
+    card.className = 'champ-card' + (c.champion === State.champion ? ' active' : '') + tierCls;
+    const arrow = c.tier === 'top'
+      ? '<span class="tier-arrow up" title="Top performer (≥15% above LCK role avg)">▲</span>'
+      : c.tier === 'bottom'
+      ? '<span class="tier-arrow down" title="Underperforming (≥15% below LCK role avg)">▼</span>'
+      : '';
     card.innerHTML =
       `<img src="${c.image_url}" alt="${c.champion}" ` +
       `onerror="this.style.visibility='hidden'" />` +
+      arrow +
       `<div class="champ-card-name">${c.champion}</div>` +
       `<div class="champ-card-games">${c.games} games</div>`;
     card.onclick = async () => {

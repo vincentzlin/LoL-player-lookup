@@ -28,6 +28,12 @@ class ChampionMetrics(Metrics):
     champion: str
     champion_ddragon: str
     image_url: str
+    tier: str | None = None        # "top" / "bottom" / None
+
+
+class Streak(BaseModel):
+    type: str                      # "win" / "loss"
+    length: int
 
 
 class SeasonOption(BaseModel):
@@ -57,3 +63,4 @@ class StatsResponse(BaseModel):
     champions: list[ChampionMetrics]
     selected_champion: ChampionMetrics | None = None
     lck_champion_baseline: Metrics | None = None
+    streak: Streak | None = None

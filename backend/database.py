@@ -39,6 +39,7 @@ class PlayerGameStat(Base):
     earnedgoldshare = Column(Float)             # 0..1 (gold%)
     golddiffat15 = Column(Float)                # nullable
     csdiffat15 = Column(Float)                  # nullable
+    result = Column(String)                     # "Win" / "Loss" (nullable)
     datacompleteness = Column(String)
 
 
