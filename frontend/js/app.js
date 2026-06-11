@@ -41,26 +41,98 @@ function showLoading(msg) { $('loading-msg').textContent = msg || 'Loading…'; 
 function hideLoading() { $('loading').classList.add('hidden'); }
 
 // ── Search ───────────────────────────────────────────────────────────────────
-async function initPlayers() {
-  const players = await Api.players();
-  const dl = $('player-list');
-  const chips = $('player-chips');
-  dl.innerHTML = '';
-  chips.innerHTML = '';
-  players.forEach((p) => {
-    const opt = document.createElement('option');
-    opt.value = p.name;
-    dl.appendChild(opt);
+let ALL_PLAYERS = [];        // cached roster from /api/players (drives autocomplete)
 
+async function initPlayers() {
+  ALL_PLAYERS = await Api.players();
+  const chips = $('player-chips');
+  chips.innerHTML = '';
+  ALL_PLAYERS.forEach((p) => {
     const chip = document.createElement('button');
     chip.className = 'quick-chip';
     chip.innerHTML = `${p.name}<span>${p.role_label} · ${p.team}</span>`;
-    chip.onclick = () => { $('search-input').value = p.name; doSearch(); };
+    chip.onclick = () => selectPlayer(p.name);
     chips.appendChild(chip);
   });
 }
 
+// ── Autocomplete ─────────────────────────────────────────────────────────────
+let acIndex = -1;            // index of the keyboard-highlighted row (-1 = none)
+
+// Returns true if every char of `q` appears in `name` in order (typo/gap tolerant).
+function isSubsequence(q, name) {
+  let i = 0;
+  for (let j = 0; j < name.length && i < q.length; j++) {
+    if (name[j] === q[i]) i++;
+  }
+  return i === q.length;
+}
+
+// Rank the roster against the typed text. Only the player NAME is matched —
+// team is display-only. Empty query returns the whole roster.
+function matchPlayers(query) {
+  const q = query.trim().toLowerCase();
+  if (!q) return ALL_PLAYERS.slice();
+  const scored = [];
+  ALL_PLAYERS.forEach((p) => {
+    const name = p.name.toLowerCase();
+    let rank;
+    if (name === q) rank = 0;
+    else if (name.startsWith(q)) rank = 1;
+    else if (name.includes(q)) rank = 2;
+    else if (isSubsequence(q, name)) rank = 3;
+    else return;
+    scored.push({ p, rank });
+  });
+  scored.sort((a, b) => a.rank - b.rank || a.p.name.localeCompare(b.p.name));
+  return scored.map((s) => s.p);
+}
+
+function hideAutocomplete() {
+  const list = $('ac-list');
+  list.classList.add('hidden');
+  $('search-input').setAttribute('aria-expanded', 'false');
+  acIndex = -1;
+}
+
+function showAutocomplete(query) {
+  const matches = matchPlayers(query);
+  const list = $('ac-list');
+  list.innerHTML = '';
+  acIndex = -1;
+  if (!matches.length) { hideAutocomplete(); return; }
+  matches.forEach((p) => {
+    const li = document.createElement('li');
+    li.className = 'ac-item';
+    li.setAttribute('role', 'option');
+    li.dataset.name = p.name;
+    li.innerHTML = `<span class="name">${p.name}</span><span class="team">${p.team}</span>`;
+    // mousedown (not click) so it fires before the input's blur.
+    li.addEventListener('mousedown', (e) => { e.preventDefault(); selectPlayer(p.name); });
+    list.appendChild(li);
+  });
+  list.classList.remove('hidden');
+  $('search-input').setAttribute('aria-expanded', 'true');
+}
+
+function moveAcHighlight(delta) {
+  const items = $('ac-list').querySelectorAll('.ac-item');
+  if (!items.length) return;
+  if (acIndex >= 0) items[acIndex].classList.remove('active');
+  acIndex = (acIndex + delta + items.length) % items.length;
+  items[acIndex].classList.add('active');
+  items[acIndex].scrollIntoView({ block: 'nearest' });
+}
+
+// Fill the box with just the player name (no team) and run the search.
+function selectPlayer(name) {
+  $('search-input').value = name;
+  hideAutocomplete();
+  doSearch();
+}
+
 async function doSearch() {
+  hideAutocomplete();
   const name = $('search-input').value.trim();
   const err = $('search-error');
   err.classList.add('hidden');
@@ -242,10 +314,33 @@ function renderChampDetail() {
 
 // ── Wire up ──────────────────────────────────────────────────────────────────
 $('search-btn').onclick = doSearch;
-$('search-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') doSearch(); });
+
+const searchInput = $('search-input');
+searchInput.addEventListener('input', () => showAutocomplete(searchInput.value));
+searchInput.addEventListener('focus', () => showAutocomplete(searchInput.value));
+searchInput.addEventListener('keydown', (e) => {
+  switch (e.key) {
+    case 'ArrowDown': e.preventDefault(); moveAcHighlight(+1); break;
+    case 'ArrowUp':   e.preventDefault(); moveAcHighlight(-1); break;
+    case 'Escape':    hideAutocomplete(); break;
+    case 'Enter': {
+      const items = $('ac-list').querySelectorAll('.ac-item');
+      if (acIndex >= 0 && items[acIndex]) selectPlayer(items[acIndex].dataset.name);
+      else doSearch();
+      break;
+    }
+  }
+});
+
+// Close the dropdown when clicking anywhere outside the search box.
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.search-input-wrap')) hideAutocomplete();
+});
+
 $('back-btn').onclick = () => {
   $('results').classList.add('hidden');
   $('search-input').value = '';
+  hideAutocomplete();
   $('search-input').focus();
 };
 

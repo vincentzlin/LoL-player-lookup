@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>LCK Pro Player Stats</title>
-  <link rel="stylesheet" href="/static/css/style.css?v=1" />
+  <link rel="stylesheet" href="/static/css/style.css?v=2" />
 </head>
 <body>
   <header class="header">
@@ -26,10 +26,14 @@
       <div class="search-wrapper">
         <label class="picker-label" for="search-input">Search a pro player</label>
         <div style="display:flex; gap:10px;">
-          <input id="search-input" class="search-input" type="text"
-                 list="player-list" autocomplete="off"
-                 placeholder="Type a name: Teddy, Ruler, Kiin or Zeus" />
-          <datalist id="player-list"></datalist>
+          <div class="search-input-wrap">
+            <input id="search-input" class="search-input" type="text"
+                   autocomplete="off"
+                   placeholder="Type a name: Teddy, Ruler, Kiin or Zeus"
+                   role="combobox" aria-autocomplete="list" aria-expanded="false"
+                   aria-controls="ac-list" />
+            <ul id="ac-list" class="ac-list hidden" role="listbox"></ul>
+          </div>
           <button id="search-btn" class="btn btn-primary">Search</button>
         </div>
         <div id="search-error" class="search-error hidden"></div>
@@ -82,7 +86,7 @@
     <div id="loading-msg">Loading…</div>
   </div>
 
-  <script src="/static/js/api.js?v=1"></script>
-  <script src="/static/js/app.js?v=1"></script>
+  <script src="/static/js/api.js?v=2"></script>
+  <script src="/static/js/app.js?v=2"></script>
 </body>
 </html>
