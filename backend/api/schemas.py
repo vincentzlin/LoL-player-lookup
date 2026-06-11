@@ -36,6 +36,61 @@ class Streak(BaseModel):
     length: int
 
 
+class MatchSummary(BaseModel):
+    gameid: str
+    date: str | None = None
+    tournament: str | None = None
+    side: str | None = None            # "Blue" / "Red"
+    result: str | None = None          # "Win" / "Loss"
+    champion: str | None = None
+    champion_ddragon: str = ""
+    image_url: str = ""
+    kills: int | None = None
+    deaths: int | None = None
+    assists: int | None = None
+    team: str | None = None
+    opponent_team: str | None = None
+    opponent_champion: str | None = None
+    opponent_image_url: str = ""
+    # Item-timing scaffold (seconds). Always None until a data source provides it.
+    item1_completed_s: int | None = None
+    item2_completed_s: int | None = None
+    item3_completed_s: int | None = None
+
+
+class MatchPlayer(BaseModel):
+    position: str | None = None
+    playername: str | None = None
+    champion: str | None = None
+    champion_ddragon: str = ""
+    image_url: str = ""
+    kills: int | None = None
+    deaths: int | None = None
+    assists: int | None = None
+    cs: int | None = None
+    gold: int | None = None
+    level: int | None = None           # not in Oracle's Elixir → "N/A"
+
+
+class MatchTeam(BaseModel):
+    side: str | None = None            # "Blue" / "Red"
+    teamname: str | None = None
+    result: str | None = None          # "Win" / "Loss"
+    kills: int | None = None           # total team kills
+    towers: int | None = None
+    dragons: int | None = None
+    barons: int | None = None
+    players: list[MatchPlayer] = []
+
+
+class MatchDetail(BaseModel):
+    gameid: str
+    date: str | None = None
+    tournament: str | None = None
+    gamelength_s: int | None = None
+    teams: list[MatchTeam] = []
+
+
 class SeasonOption(BaseModel):
     year: int
     season: int
@@ -64,3 +119,4 @@ class StatsResponse(BaseModel):
     selected_champion: ChampionMetrics | None = None
     lck_champion_baseline: Metrics | None = None
     streak: Streak | None = None
+    matches: list[MatchSummary] = []

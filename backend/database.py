@@ -25,14 +25,28 @@ class PlayerGameStat(Base):
     date = Column(String)
     playername = Column(String, nullable=False)
     teamname = Column(String)
+    side = Column(String)                       # "Blue" / "Red" (side of the Rift)
     position = Column(String, nullable=False)   # top/jng/mid/bot/sup
     champion = Column(String)
     champion_ddragon = Column(String)           # normalized id for image URLs
+    # Item-timing scaffold: time (seconds) the 1st/2nd/3rd item was completed.
+    # Oracle's Elixir has no item data, so these are always NULL for now — present
+    # so the metric can be populated later if a data source becomes available.
+    item1_completed_s = Column(Integer)
+    item2_completed_s = Column(Integer)
+    item3_completed_s = Column(Integer)
     kills = Column(Integer, default=0)
     deaths = Column(Integer, default=0)
     assists = Column(Integer, default=0)
+    teamkills = Column(Integer)                 # total kills by the player's team
     gamelength_s = Column(Integer)              # game length in seconds
     totalgold = Column(Integer)
+    total_cs = Column(Integer)                  # creep score (minions + monsters)
+    # Team objective totals, denormalized from the Oracle "team" row onto each
+    # player row (blank on player rows in the source data).
+    towers = Column(Integer)
+    dragons = Column(Integer)
+    barons = Column(Integer)
     cspm = Column(Float)                        # CS per minute (direct column)
     dpm = Column(Float)                         # damage per minute (direct column)
     damageshare = Column(Float)                 # 0..1
