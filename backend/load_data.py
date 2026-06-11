@@ -28,7 +28,7 @@ USECOLS = [
     "date", "playername", "teamname", "position", "champion",
     "kills", "deaths", "assists", "gamelength", "totalgold",
     "cspm", "dpm", "damageshare", "earnedgoldshare",
-    "golddiffat15", "csdiffat15",
+    "golddiffat15", "csdiffat15", "result",
 ]
 
 
@@ -52,6 +52,14 @@ def _to_float(v, default=None):
 
 def _to_bool(v):
     return str(v).strip() in ("1", "1.0", "True", "true")
+
+
+def _to_result(v):
+    """Oracle's `result` is 1 (win) / 0 (loss); map to 'Win'/'Loss' or None."""
+    n = _to_int(v)
+    if n is None:
+        return None
+    return "Win" if n else "Loss"
 
 
 def discover_csvs() -> list[Path]:
@@ -117,6 +125,7 @@ def load(paths: list[Path]) -> None:
                     earnedgoldshare=_to_float(d.get("earnedgoldshare")),
                     golddiffat15=_to_float(d.get("golddiffat15")),
                     csdiffat15=_to_float(d.get("csdiffat15")),
+                    result=_to_result(d.get("result")),
                     datacompleteness=(str(d.get("datacompleteness")) if not pd.isna(d.get("datacompleteness")) else None),
                 ))
 

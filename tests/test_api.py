@@ -99,6 +99,38 @@ def test_champion_detail_three_way_comparison(client):
     assert d["overall"]["games"] == 4
 
 
+def test_champion_tiers(client):
+    """Kiin 2026 Spring: Kennen is top, Gragas is bottom, Sion (2 games) untiered."""
+    d = client.get("/api/player/Kiin/stats",
+                   params={"season": 16, "split": "Spring"}).json()
+    tiers = {c["champion"]: c["tier"] for c in d["champions"]}
+    assert tiers["Kennen"] == "top"
+    assert tiers["Gragas"] == "bottom"
+    assert tiers["Sion"] is None          # strong stats but only 2 games
+
+
+def test_tier_requires_min_three_games(client):
+    """Zeus 2025 Spring Jax (2 games) is never tiered regardless of stats."""
+    d = client.get("/api/player/Zeus/stats",
+                   params={"season": 15, "split": "Spring"}).json()
+    jax = next(c for c in d["champions"] if c["champion"] == "Jax")
+    assert jax["games"] == 2 and jax["tier"] is None
+
+
+def test_win_streak_detected(client):
+    """Kiin's most recent 3 games (by gameid order) are all wins."""
+    d = client.get("/api/player/Kiin/stats",
+                   params={"season": 16, "split": "Spring"}).json()
+    assert d["streak"] == {"type": "win", "length": 3}
+
+
+def test_no_streak_below_threshold(client):
+    """Ruler has a single seeded game -> no 3+ streak."""
+    d = client.get("/api/player/Ruler/stats",
+                   params={"season": 15, "split": "Spring"}).json()
+    assert d["streak"] is None
+
+
 def test_empty_timeframe_is_graceful(client):
     d = client.get("/api/player/Zeus/stats",
                    params={"season": 15, "split": "Summer"}).json()

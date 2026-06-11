@@ -5,7 +5,7 @@ from backend.config import PLAYERS, find_player
 from backend.database import get_session
 from backend.api import stats
 from backend.api.schemas import (
-    PlayerInfo, FiltersResponse, StatsResponse, Metrics, ChampionMetrics,
+    PlayerInfo, FiltersResponse, StatsResponse, Metrics, ChampionMetrics, Streak,
 )
 
 router = APIRouter(prefix="/api")
@@ -47,8 +47,9 @@ def player_stats(
     with get_session() as session:
         all_rows = stats.player_rows(session, p["name"], season, split)
         overall = stats.metrics_from_rows(all_rows)
-        champions = stats.player_champions(all_rows)
         role_base = stats.lck_role_baseline(session, role, season, split)
+        champions = stats.player_champions(all_rows, role_base)
+        streak = stats.current_streak(all_rows)
 
         selected = None
         champ_base = None
@@ -75,4 +76,5 @@ def player_stats(
             champions=[ChampionMetrics(**c) for c in champions],
             selected_champion=selected,
             lck_champion_baseline=champ_base,
+            streak=Streak(**streak) if streak else None,
         )

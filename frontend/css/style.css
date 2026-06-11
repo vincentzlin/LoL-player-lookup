@@ -121,6 +121,14 @@ body {
 .tag-role { background: #1a2a3a; color: #79c0ff; }
 .tag-team { background: var(--bg3); color: var(--text-muted); }
 
+/* ── Win/loss streak badge ───────────────────────────────── */
+.streak-badge {
+  display: inline-block; padding: 2px 9px;
+  border-radius: 4px; font-size: 11px; font-weight: 700; letter-spacing: .5px;
+}
+.streak-badge.win { background: var(--win); color: #000; }
+.streak-badge.loss { background: var(--loss); color: #000; }
+
 /* ── Detail hero + filters ───────────────────────────────── */
 .back-btn {
   background: none; border: none; color: var(--accent);
@@ -187,13 +195,25 @@ table.cmp tr:hover td { background: rgba(255,255,255,.02); }
   gap: 12px;
 }
 .champ-card {
+  position: relative;
   background: var(--bg3); border: 1px solid var(--border);
   border-radius: var(--radius); padding: 10px 6px;
   display: flex; flex-direction: column; align-items: center; gap: 6px;
   cursor: pointer; transition: border-color .15s, transform .1s;
 }
 .champ-card:hover { border-color: var(--accent); transform: translateY(-2px); }
+.champ-card.tier-top { border-color: var(--win); box-shadow: 0 0 0 1px var(--win); }
+.champ-card.tier-bottom { border-color: var(--loss); box-shadow: 0 0 0 1px var(--loss); }
+/* selection (orange) always overrides the tier ring */
 .champ-card.active { border-color: var(--accent2); box-shadow: 0 0 0 1px var(--accent2); }
+
+.tier-arrow {
+  position: absolute; top: 6px; right: 6px;
+  font-size: 12px; line-height: 1; font-weight: 700;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, .8); pointer-events: none;
+}
+.tier-arrow.up { color: var(--win); }
+.tier-arrow.down { color: var(--loss); }
 .champ-card img {
   width: 56px; height: 56px; border-radius: 8px; background: var(--bg);
   object-fit: cover;
