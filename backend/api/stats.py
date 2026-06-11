@@ -75,6 +75,127 @@ def player_rows(session: Session, name: str, season=None, split=None,
     return q.all()
 
 
+def tournament_label(row: PlayerGameStat) -> str:
+    """Synthesize a tournament name from the stored timeframe fields.
+
+    Oracle's Elixir has no event name; build one from league/year/split/playoffs,
+    e.g. "LCK 2026 Spring" or "LCK 2026 Spring Playoffs"."""
+    parts = [row.league or "LCK"]
+    if row.year:
+        parts.append(str(row.year))
+    if row.split:
+        parts.append(row.split)
+    label = " ".join(parts)
+    return f"{label} Playoffs" if row.playoffs else label
+
+
+# Player roles in scoreboard order (excludes Oracle's "team" aggregate row).
+_ROLE_ORDER = ["top", "jng", "mid", "bot", "sup"]
+
+
+def player_matches(session: Session, name: str, season=None, split=None,
+                   champion: str | None = None, limit: int = 5) -> list[dict]:
+    """The player's `limit` most-recent games in the timeframe, newest first.
+
+    Each match includes the score line, both teams, the side of the Rift and the
+    opposing laner (same gameid, same position, opposite side). Item-timing fields
+    are passed through (currently always None — Oracle's Elixir has no item data).
+    """
+    q = session.query(PlayerGameStat).filter(PlayerGameStat.playername == name)
+    q = _apply_timeframe(q, season, split)
+    if champion:
+        q = q.filter(PlayerGameStat.champion == champion)
+    rows = (q.order_by(PlayerGameStat.date.desc(), PlayerGameStat.gameid.desc())
+             .limit(limit).all())
+
+    out = []
+    for r in rows:
+        opp = (session.query(PlayerGameStat)
+               .filter(PlayerGameStat.gameid == r.gameid,
+                       PlayerGameStat.position == r.position,
+                       PlayerGameStat.side != r.side)
+               .first()) if r.side else None
+        out.append({
+            "gameid": r.gameid,
+            "date": r.date,
+            "tournament": tournament_label(r),
+            "side": r.side,
+            "result": r.result,
+            "champion": r.champion,
+            "champion_ddragon": r.champion_ddragon or "",
+            "image_url": image_url(r.champion) if r.champion else "",
+            "kills": r.kills,
+            "deaths": r.deaths,
+            "assists": r.assists,
+            "team": r.teamname,
+            "opponent_team": opp.teamname if opp else None,
+            "opponent_champion": opp.champion if opp else None,
+            "opponent_image_url": image_url(opp.champion) if opp and opp.champion else "",
+            "item1_completed_s": r.item1_completed_s,
+            "item2_completed_s": r.item2_completed_s,
+            "item3_completed_s": r.item3_completed_s,
+        })
+    return out
+
+
+def match_detail(session: Session, gameid: str) -> dict | None:
+    """Full scoreboard for one game: both teams, objectives and all 10 champions.
+
+    Returns ``None`` when the gameid isn't in the DB. Objective totals (team kills,
+    towers/dragons/barons) are denormalized onto every player row, so they're read
+    from any row of a side. Champion level is unavailable in Oracle's Elixir and is
+    always ``None`` (rendered as "N/A")."""
+    rows = (session.query(PlayerGameStat)
+            .filter(PlayerGameStat.gameid == gameid)
+            .filter(PlayerGameStat.position.in_(_ROLE_ORDER))
+            .all())
+    if not rows:
+        return None
+
+    by_side: dict[str, list[PlayerGameStat]] = {}
+    for r in rows:
+        by_side.setdefault(r.side or "", []).append(r)
+
+    def build_team(side_rows: list[PlayerGameStat]) -> dict:
+        anchor = side_rows[0]
+        players = sorted(
+            side_rows,
+            key=lambda r: _ROLE_ORDER.index(r.position) if r.position in _ROLE_ORDER else 99,
+        )
+        return {
+            "side": anchor.side,
+            "teamname": anchor.teamname,
+            "result": anchor.result,
+            "kills": anchor.teamkills,
+            "towers": anchor.towers,
+            "dragons": anchor.dragons,
+            "barons": anchor.barons,
+            "players": [{
+                "position": p.position,
+                "playername": p.playername,
+                "champion": p.champion,
+                "champion_ddragon": p.champion_ddragon or "",
+                "image_url": image_url(p.champion) if p.champion else "",
+                "kills": p.kills,
+                "deaths": p.deaths,
+                "assists": p.assists,
+                "cs": p.total_cs,
+                "gold": p.totalgold,
+                "level": None,       # not in Oracle's Elixir
+            } for p in players],
+        }
+
+    anchor = rows[0]
+    teams = [build_team(by_side[s]) for s in ("Blue", "Red") if by_side.get(s)]
+    return {
+        "gameid": gameid,
+        "date": anchor.date,
+        "tournament": tournament_label(anchor),
+        "gamelength_s": anchor.gamelength_s,
+        "teams": teams,
+    }
+
+
 def player_champions(rows: list[PlayerGameStat],
                      role_baseline: dict | None = None) -> list[dict]:
     """Group a player's rows by champion, with per-champion metrics + image.

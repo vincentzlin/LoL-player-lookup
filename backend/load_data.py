@@ -25,8 +25,9 @@ log = logging.getLogger(__name__)
 # Oracle columns we read (a subset of the ~120 available).
 USECOLS = [
     "gameid", "datacompleteness", "league", "year", "split", "playoffs",
-    "date", "playername", "teamname", "position", "champion",
-    "kills", "deaths", "assists", "gamelength", "totalgold",
+    "date", "playername", "teamname", "side", "position", "champion",
+    "kills", "deaths", "assists", "teamkills", "gamelength", "totalgold",
+    "total cs", "towers", "dragons", "barons",
     "cspm", "dpm", "damageshare", "earnedgoldshare",
     "golddiffat15", "csdiffat15", "result",
 ]
@@ -90,8 +91,23 @@ def load(paths: list[Path]) -> None:
             log.info("Reading %s ...", path.name)
             df = pd.read_csv(path, usecols=lambda c: c in USECOLS, low_memory=False)
 
-            # LCK player rows only, within the target seasons.
+            # LCK rows only. Rename "total cs" before iterating: itertuples mangles
+            # column names that aren't valid Python identifiers (spaces).
             df = df[df["league"] == LEAGUE]
+            df = df.rename(columns={"total cs": "total_cs"})
+
+            # Team objective totals live only on the Oracle "team" rows; build a
+            # {(gameid, side): (towers, dragons, barons)} map to denormalize onto
+            # each player row (where these columns are blank).
+            obj_map: dict[tuple[str, str], tuple] = {}
+            for t in df[df["position"] == "team"].itertuples(index=False):
+                td = t._asdict()
+                obj_map[(str(td.get("gameid") or ""), td.get("side"))] = (
+                    _to_int(td.get("towers")), _to_int(td.get("dragons")),
+                    _to_int(td.get("barons")),
+                )
+
+            # Persist player rows only, within the target seasons.
             df = df[df["position"].isin(["top", "jng", "mid", "bot", "sup"])]
             df = df[df["year"].apply(lambda y: _to_int(y) in wanted_years)]
 
@@ -102,6 +118,8 @@ def load(paths: list[Path]) -> None:
                 pname = str(d.get("playername") or "").strip()
                 if pname in pro_hits:
                     pro_hits[pname] += 1
+                towers, dragons, barons = obj_map.get(
+                    (str(d.get("gameid") or ""), d.get("side")), (None, None, None))
                 rows.append(PlayerGameStat(
                     gameid=str(d.get("gameid") or ""),
                     league=d.get("league"),
@@ -111,14 +129,20 @@ def load(paths: list[Path]) -> None:
                     date=(str(d.get("date")) if not pd.isna(d.get("date")) else None),
                     playername=pname,
                     teamname=(str(d.get("teamname")) if not pd.isna(d.get("teamname")) else None),
+                    side=(str(d.get("side")) if not pd.isna(d.get("side")) else None),
                     position=d.get("position"),
                     champion=(str(champ) if not pd.isna(champ) else None),
                     champion_ddragon=to_ddragon_id(str(champ) if not pd.isna(champ) else None),
                     kills=_to_int(d.get("kills"), 0),
                     deaths=_to_int(d.get("deaths"), 0),
                     assists=_to_int(d.get("assists"), 0),
+                    teamkills=_to_int(d.get("teamkills")),
                     gamelength_s=_to_int(d.get("gamelength")),
                     totalgold=_to_int(d.get("totalgold")),
+                    total_cs=_to_int(d.get("total_cs")),
+                    towers=towers,
+                    dragons=dragons,
+                    barons=barons,
                     cspm=_to_float(d.get("cspm")),
                     dpm=_to_float(d.get("dpm")),
                     damageshare=_to_float(d.get("damageshare")),

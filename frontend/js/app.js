@@ -184,6 +184,7 @@ function renderShell() {
   renderSplitRow();
   renderOverall();
   renderChampGrid();
+  renderMatchHistory();
   renderChampDetail();
 }
 
@@ -291,10 +292,147 @@ function renderChampGrid() {
       `<div class="champ-card-games">${c.games} games</div>`;
     card.onclick = async () => {
       State.champion = (State.champion === c.champion) ? null : c.champion;
-      showLoading(); await loadStats(); renderChampGrid(); renderChampDetail(); hideLoading();
+      showLoading(); await loadStats();
+      renderChampGrid(); renderMatchHistory(); renderChampDetail(); hideLoading();
     };
     grid.appendChild(card);
   });
+}
+
+// Format an item-completion time (seconds) as mm:ss, or "N/A" when absent.
+function itemTime(s) {
+  if (s == null) return 'N/A';
+  const m = Math.floor(s / 60);
+  return `${m}:${String(s % 60).padStart(2, '0')}`;
+}
+
+// Gold rounded to the nearest hundred, shown as "13.7k" (or "N/A" when absent).
+function goldK(g) {
+  if (g == null) return 'N/A';
+  return (Math.round(g / 100) * 100 / 1000).toFixed(1) + 'k';
+}
+
+// Just the calendar date portion of Oracle's "YYYY-MM-DD HH:MM:SS" string.
+function matchDate(d) { return d ? String(d).split(' ')[0] : '—'; }
+
+function renderMatchHistory() {
+  const wrap = $('match-history');
+  const matches = State.lastStats.matches || [];
+  $('match-title').textContent = State.champion
+    ? `Match history — ${State.champion}` : 'Match history';
+  wrap.innerHTML = '';
+  if (!matches.length) {
+    wrap.innerHTML = '<div class="no-data">No matches in this timeframe.</div>';
+    return;
+  }
+  matches.forEach((mt) => {
+    const won = mt.result === 'Win';
+    const card = document.createElement('div');
+    card.className = 'match-card ' + (won ? 'win' : 'loss');
+    const sideCls = (mt.side || '').toLowerCase() === 'blue' ? 'side-blue' : 'side-red';
+    card.innerHTML =
+      `<div class="match-summary" role="button" tabindex="0" aria-expanded="false">` +
+        `<div class="match-header">` +
+          `<span class="match-date">${matchDate(mt.date)}</span>` +
+          `<span class="match-tournament">${mt.tournament || ''}</span>` +
+          `<span class="match-chevron">▾</span>` +
+        `</div>` +
+        `<div class="match-top">` +
+          `<span class="result-tag ${won ? 'win' : 'loss'}">${won ? 'W' : 'L'}</span>` +
+          `<span class="side-badge ${sideCls}">${mt.side || '—'}</span>` +
+          `<span class="match-teams">${mt.team || '—'} <em>vs</em> ${mt.opponent_team || '—'}</span>` +
+        `</div>` +
+        `<div class="match-mid">` +
+          `<div class="match-champ">` +
+            `<img src="${mt.image_url}" alt="${mt.champion || ''}" onerror="this.style.visibility='hidden'" />` +
+            `<span>${mt.champion || '—'}</span>` +
+          `</div>` +
+          `<span class="match-vs">vs</span>` +
+          `<div class="match-champ opp">` +
+            `<img src="${mt.opponent_image_url}" alt="${mt.opponent_champion || ''}" onerror="this.style.visibility='hidden'" />` +
+            `<span>${mt.opponent_champion || '—'}</span>` +
+          `</div>` +
+          `<span class="match-score">${mt.kills ?? 0} / ${mt.deaths ?? 0} / ${mt.assists ?? 0}</span>` +
+        `</div>` +
+        `<div class="match-items">Item timing — ` +
+          `1st <b>${itemTime(mt.item1_completed_s)}</b> · ` +
+          `2nd <b>${itemTime(mt.item2_completed_s)}</b> · ` +
+          `3rd <b>${itemTime(mt.item3_completed_s)}</b></div>` +
+      `</div>` +
+      `<div class="match-detail hidden"></div>`;
+
+    const summary = card.querySelector('.match-summary');
+    const detail = card.querySelector('.match-detail');
+    const toggle = () => toggleMatchDetail(mt, card, summary, detail);
+    summary.addEventListener('click', toggle);
+    summary.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
+    });
+    wrap.appendChild(card);
+  });
+}
+
+// Expand/collapse a match card, lazily loading the full scoreboard once.
+async function toggleMatchDetail(mt, card, summary, detail) {
+  const open = !detail.classList.contains('hidden');
+  if (open) {
+    detail.classList.add('hidden');
+    summary.setAttribute('aria-expanded', 'false');
+    card.classList.remove('expanded');
+    return;
+  }
+  detail.classList.remove('hidden');
+  summary.setAttribute('aria-expanded', 'true');
+  card.classList.add('expanded');
+  if (mt._detail === undefined) {
+    detail.innerHTML = '<div class="md-loading">Loading game details…</div>';
+    try {
+      mt._detail = await Api.match(mt.gameid);
+    } catch (e) {
+      mt._detail = null;
+    }
+  }
+  detail.innerHTML = mt._detail
+    ? matchDetailHtml(mt._detail)
+    : '<div class="no-data">Couldn’t load game details.</div>';
+}
+
+function matchDetailHtml(d) {
+  return (d.teams || []).map((t) => {
+    const won = t.result === 'Win';
+    const sideCls = (t.side || '').toLowerCase() === 'blue' ? 'side-blue' : 'side-red';
+    const me = (State.player || '').toLowerCase();
+    const rows = (t.players || []).map((p) => {
+      const isYou = p.playername && p.playername.toLowerCase() === me;
+      return `<tr${isYou ? ' class="is-you"' : ''}>` +
+        `<td class="md-champ">` +
+          `<img src="${p.image_url}" alt="${p.champion || ''}" onerror="this.style.visibility='hidden'" />` +
+          `<span class="md-names">` +
+            `<span class="md-pname">${p.playername || '—'}</span>` +
+            `<span class="md-cname">${p.champion || '—'}</span>` +
+          `</span>` +
+        `</td>` +
+        `<td>${p.kills ?? 0} / ${p.deaths ?? 0} / ${p.assists ?? 0}</td>` +
+        `<td>${p.cs ?? '—'}</td>` +
+        `<td>${goldK(p.gold)}</td>` +
+        `<td>${p.level == null ? 'N/A' : p.level}</td>` +
+      `</tr>`;
+    }).join('');
+    return (
+      `<div class="md-team ${sideCls}">` +
+        `<div class="md-team-head">` +
+          `<span class="result-tag ${won ? 'win' : 'loss'}">${won ? 'W' : 'L'}</span>` +
+          `<span class="md-teamname">${t.teamname || t.side || '—'}</span>` +
+          `<span class="md-obj">` +
+            `Kills <b>${t.kills ?? 0}</b> · Towers <b>${t.towers ?? 0}</b> · ` +
+            `Dragons <b>${t.dragons ?? 0}</b> · Barons <b>${t.barons ?? 0}</b></span>` +
+        `</div>` +
+        `<table class="md-board">` +
+          `<thead><tr><th>Champion</th><th>K / D / A</th><th>CS</th><th>Gold</th><th>Lvl</th></tr></thead>` +
+          `<tbody>${rows}</tbody>` +
+        `</table>` +
+      `</div>`);
+  }).join('');
 }
 
 function renderChampDetail() {

@@ -10,6 +10,7 @@ const Api = {
     return res.json();
   },
   players() { return this._get('/api/players'); },
+  match(gameid) { return this._get(`/api/match/${encodeURIComponent(gameid)}`); },
   filters(name) { return this._get(`/api/player/${encodeURIComponent(name)}/filters`); },
   stats(name, { season, split, champion } = {}) {
     const p = new URLSearchParams();

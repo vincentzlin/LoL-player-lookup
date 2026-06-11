@@ -6,6 +6,7 @@ from backend.database import get_session
 from backend.api import stats
 from backend.api.schemas import (
     PlayerInfo, FiltersResponse, StatsResponse, Metrics, ChampionMetrics, Streak,
+    MatchSummary, MatchDetail,
 )
 
 router = APIRouter(prefix="/api")
@@ -35,6 +36,15 @@ def player_filters(name: str):
         return stats.available_filters(session, p["name"])
 
 
+@router.get("/match/{gameid}", response_model=MatchDetail)
+def match_detail(gameid: str):
+    with get_session() as session:
+        detail = stats.match_detail(session, gameid)
+    if detail is None:
+        raise HTTPException(status_code=404, detail=f"No game found for '{gameid}'.")
+    return MatchDetail(**detail)
+
+
 @router.get("/player/{name}/stats", response_model=StatsResponse)
 def player_stats(
     name: str,
@@ -47,6 +57,7 @@ def player_stats(
     with get_session() as session:
         all_rows = stats.player_rows(session, p["name"], season, split)
         overall = stats.metrics_from_rows(all_rows)
+        matches = stats.player_matches(session, p["name"], season, split, champion)
         role_base = stats.lck_role_baseline(session, role, season, split)
         champions = stats.player_champions(all_rows, role_base)
         streak = stats.current_streak(all_rows)
@@ -77,4 +88,5 @@ def player_stats(
             selected_champion=selected,
             lck_champion_baseline=champ_base,
             streak=Streak(**streak) if streak else None,
+            matches=[MatchSummary(**m) for m in matches],
         )
