@@ -1,12 +1,12 @@
 """API routes."""
 from fastapi import APIRouter, HTTPException, Query
 
-from backend.config import PLAYERS, find_player
+from backend.config import PLAYERS, find_player, distinct_roles
 from backend.database import get_session
 from backend.api import stats
 from backend.api.schemas import (
     PlayerInfo, FiltersResponse, StatsResponse, Metrics, ChampionMetrics, Streak,
-    MatchSummary, MatchDetail,
+    MatchSummary, MatchDetail, TeamInfo, RoleInfo, TeamGroupResponse, RoleGroupResponse,
 )
 
 router = APIRouter(prefix="/api")
@@ -14,11 +14,48 @@ router = APIRouter(prefix="/api")
 
 @router.get("/players", response_model=list[PlayerInfo])
 def list_players():
+    with get_session() as session:
+        return [
+            PlayerInfo(name=p["name"], role=p["role"],
+                       role_label=stats.role_label(p["role"]),
+                       team=stats.current_team(session, p["name"], p["team"]))
+            for p in PLAYERS
+        ]
+
+
+@router.get("/teams", response_model=list[TeamInfo])
+def list_teams():
+    with get_session() as session:
+        cmap = stats.current_teams(session)
+        return [
+            TeamInfo(team=t, player_count=sum(1 for v in cmap.values() if v == t))
+            for t in stats.distinct_teams(session)
+        ]
+
+
+@router.get("/roles", response_model=list[RoleInfo])
+def list_roles():
     return [
-        PlayerInfo(name=p["name"], role=p["role"],
-                   role_label=stats.role_label(p["role"]), team=p["team"])
-        for p in PLAYERS
+        RoleInfo(role=r, role_label=stats.role_label(r),
+                 player_count=sum(1 for p in PLAYERS if p["role"] == r))
+        for r in distinct_roles()
     ]
+
+
+@router.get("/team/{team}", response_model=TeamGroupResponse)
+def team_group(team: str):
+    with get_session() as session:
+        if team not in stats.distinct_teams(session):
+            raise HTTPException(status_code=404, detail=f"'{team}' is not a known team.")
+        return stats.team_group(session, team)
+
+
+@router.get("/role/{role}", response_model=RoleGroupResponse)
+def role_group(role: str):
+    if role not in distinct_roles():
+        raise HTTPException(status_code=404, detail=f"'{role}' is not a known role.")
+    with get_session() as session:
+        return stats.role_group(session, role)
 
 
 def _require_player(name: str) -> dict:
@@ -80,6 +117,7 @@ def player_stats(
             player=p["name"],
             role=role,
             role_label=stats.role_label(role),
+            team=stats.current_team(session, p["name"], p["team"]),
             season=season,
             split=split,
             overall=Metrics(**overall),

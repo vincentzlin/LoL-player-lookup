@@ -16,6 +16,8 @@ SEASONS = {2024: 14, 2025: 15, 2026: 16}
 
 # The only four players that are searchable. `name` must match Oracle's Elixir
 # `playername` exactly (verified by the loader). `role` uses Oracle position codes.
+# `team` is only a FALLBACK label — the displayed team is the player's most recent
+# team derived from the data (see stats.current_team), used only if they have no games.
 PLAYERS = [
     {"name": "Teddy", "role": "bot", "team": "BNK FEARX"},
     {"name": "Ruler", "role": "bot", "team": "Gen.G"},
@@ -50,3 +52,9 @@ def find_player(name: str) -> dict | None:
         if p["name"].lower() == low:
             return p
     return None
+
+
+def distinct_roles() -> list[str]:
+    """Roles represented by the allowlist, ordered top→jng→mid→bot→sup."""
+    present = {p["role"] for p in PLAYERS}
+    return [r for r in ROLE_LABELS if r in present]

@@ -10,6 +10,10 @@ const Api = {
     return res.json();
   },
   players() { return this._get('/api/players'); },
+  teams() { return this._get('/api/teams'); },
+  roles() { return this._get('/api/roles'); },
+  teamGroup(team) { return this._get(`/api/team/${encodeURIComponent(team)}`); },
+  roleGroup(role) { return this._get(`/api/role/${encodeURIComponent(role)}`); },
   match(gameid) { return this._get(`/api/match/${encodeURIComponent(gameid)}`); },
   filters(name) { return this._get(`/api/player/${encodeURIComponent(name)}/filters`); },
   stats(name, { season, split, champion } = {}) {

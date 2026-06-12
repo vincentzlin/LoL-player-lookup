@@ -14,7 +14,7 @@ const METRICS = [
   { key: 'gd15',     label: 'Gold diff @15',    dir: +1, dp: 0, signed: true },
 ];
 
-const State = { player: null, role: null, season: null, split: null,
+const State = { player: null, role: null, team: null, season: null, split: null,
                 filters: null, champion: null, lastStats: null };
 
 const $ = (id) => document.getElementById(id);
@@ -40,14 +40,32 @@ function deltaCell(playerVal, baseVal, m) {
 function showLoading(msg) { $('loading-msg').textContent = msg || 'Loading…'; $('loading').classList.remove('hidden'); }
 function hideLoading() { $('loading').classList.add('hidden'); }
 
-// ── Search ───────────────────────────────────────────────────────────────────
-let ALL_PLAYERS = [];        // cached roster from /api/players (drives autocomplete)
+// ── Search index (players + teams + roles) ───────────────────────────────────
+// Each entry: { kind:'player'|'team'|'role', key, label, sub }. `key` is what the
+// API needs (player name / team name / role code); `label` is what we match & show.
+let SEARCH_INDEX = [];
 
-async function initPlayers() {
-  ALL_PLAYERS = await Api.players();
+const KIND_LABEL = { player: 'Player', team: 'Team', role: 'Role' };
+const KIND_ORDER = { player: 0, team: 1, role: 2 };
+
+function plural(n) { return `${n} player${n === 1 ? '' : 's'}`; }
+
+async function initSearch() {
+  const [players, teams, roles] = await Promise.all([
+    Api.players(), Api.teams(), Api.roles(),
+  ]);
+  SEARCH_INDEX = [
+    ...players.map((p) => ({ kind: 'player', key: p.name, label: p.name,
+                             sub: `${p.role_label} · ${p.team}` })),
+    ...teams.map((t) => ({ kind: 'team', key: t.team, label: t.team,
+                           sub: plural(t.player_count) })),
+    ...roles.map((r) => ({ kind: 'role', key: r.role, label: r.role_label,
+                           sub: plural(r.player_count) })),
+  ];
+
   const chips = $('player-chips');
   chips.innerHTML = '';
-  ALL_PLAYERS.forEach((p) => {
+  players.forEach((p) => {
     const chip = document.createElement('button');
     chip.className = 'quick-chip';
     chip.innerHTML = `${p.name}<span>${p.role_label} · ${p.team}</span>`;
@@ -68,24 +86,26 @@ function isSubsequence(q, name) {
   return i === q.length;
 }
 
-// Rank the roster against the typed text. Only the player NAME is matched —
-// team is display-only. Empty query returns the whole roster.
-function matchPlayers(query) {
+// Rank the index against the typed text, matching on each entry's label. Ties
+// break players → teams → roles, then alphabetically. Empty query returns all.
+function matchEntries(query) {
   const q = query.trim().toLowerCase();
-  if (!q) return ALL_PLAYERS.slice();
+  if (!q) return SEARCH_INDEX.slice();
   const scored = [];
-  ALL_PLAYERS.forEach((p) => {
-    const name = p.name.toLowerCase();
+  SEARCH_INDEX.forEach((e) => {
+    const label = e.label.toLowerCase();
     let rank;
-    if (name === q) rank = 0;
-    else if (name.startsWith(q)) rank = 1;
-    else if (name.includes(q)) rank = 2;
-    else if (isSubsequence(q, name)) rank = 3;
+    if (label === q) rank = 0;
+    else if (label.startsWith(q)) rank = 1;
+    else if (label.includes(q)) rank = 2;
+    else if (isSubsequence(q, label)) rank = 3;
     else return;
-    scored.push({ p, rank });
+    scored.push({ e, rank });
   });
-  scored.sort((a, b) => a.rank - b.rank || a.p.name.localeCompare(b.p.name));
-  return scored.map((s) => s.p);
+  scored.sort((a, b) => a.rank - b.rank
+    || KIND_ORDER[a.e.kind] - KIND_ORDER[b.e.kind]
+    || a.e.label.localeCompare(b.e.label));
+  return scored.map((s) => s.e);
 }
 
 function hideAutocomplete() {
@@ -96,19 +116,23 @@ function hideAutocomplete() {
 }
 
 function showAutocomplete(query) {
-  const matches = matchPlayers(query);
+  const matches = matchEntries(query);
   const list = $('ac-list');
   list.innerHTML = '';
   acIndex = -1;
   if (!matches.length) { hideAutocomplete(); return; }
-  matches.forEach((p) => {
+  matches.forEach((e) => {
     const li = document.createElement('li');
     li.className = 'ac-item';
     li.setAttribute('role', 'option');
-    li.dataset.name = p.name;
-    li.innerHTML = `<span class="name">${p.name}</span><span class="team">${p.team}</span>`;
+    li.dataset.kind = e.kind;
+    li.dataset.key = e.key;
+    li.innerHTML =
+      `<span class="ac-kind ac-kind-${e.kind}">${KIND_LABEL[e.kind]}</span>` +
+      `<span class="name">${e.label}</span>` +
+      `<span class="team">${e.sub}</span>`;
     // mousedown (not click) so it fires before the input's blur.
-    li.addEventListener('mousedown', (e) => { e.preventDefault(); selectPlayer(p.name); });
+    li.addEventListener('mousedown', (ev) => { ev.preventDefault(); chooseEntry(e); });
     list.appendChild(li);
   });
   list.classList.remove('hidden');
@@ -124,19 +148,41 @@ function moveAcHighlight(delta) {
   items[acIndex].scrollIntoView({ block: 'nearest' });
 }
 
-// Fill the box with just the player name (no team) and run the search.
+// Route a chosen index entry to the right view.
+function chooseEntry(e) {
+  $('search-input').value = e.label;
+  hideAutocomplete();
+  if (e.kind === 'player') loadPlayer(e.key);
+  else openGroup(e.kind, e.key);
+}
+
+// Fill the box with a player name and open their profile (used by chips/cards).
 function selectPlayer(name) {
   $('search-input').value = name;
   hideAutocomplete();
-  doSearch();
+  loadPlayer(name);
 }
 
-async function doSearch() {
+// Resolve free-typed text (Search button / plain Enter) to the best match.
+function doSearch() {
   hideAutocomplete();
-  const name = $('search-input').value.trim();
+  const text = $('search-input').value.trim();
   const err = $('search-error');
   err.classList.add('hidden');
-  if (!name) return;
+  if (!text) return;
+  const best = matchEntries(text)[0];
+  if (!best) {
+    err.textContent = `No player, team or role matches "${text}".`;
+    err.classList.remove('hidden');
+    return;
+  }
+  chooseEntry(best);
+}
+
+// ── Player profile loading ───────────────────────────────────────────────────
+async function loadPlayer(name) {
+  const err = $('search-error');
+  err.classList.add('hidden');
   showLoading('Loading player…');
   try {
     State.filters = await Api.filters(name);
@@ -147,8 +193,8 @@ async function doSearch() {
     State.split = null;
     await loadStats();
     renderShell();
+    $('group-view').classList.add('hidden');
     $('results').classList.remove('hidden');
-    $('search-error').classList.add('hidden');
   } catch (e) {
     err.textContent = `"${name}" isn't searchable. Try: Teddy, Ruler, Kiin or Zeus.`;
     err.classList.remove('hidden');
@@ -158,12 +204,70 @@ async function doSearch() {
   }
 }
 
+// ── Team / role group view ───────────────────────────────────────────────────
+const RATING_LABEL = { strong: 'Strong', average: 'Average', struggling: 'Struggling' };
+
+async function openGroup(kind, key) {
+  hideAutocomplete();
+  $('search-error').classList.add('hidden');
+  showLoading('Loading…');
+  try {
+    const data = kind === 'team' ? await Api.teamGroup(key) : await Api.roleGroup(key);
+    renderGroup(kind, data);
+    $('results').classList.add('hidden');
+    $('group-view').classList.remove('hidden');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  } catch (e) {
+    const err = $('search-error');
+    err.textContent = `Couldn't load that ${kind}.`;
+    err.classList.remove('hidden');
+  } finally {
+    hideLoading();
+  }
+}
+
+function renderGroup(kind, data) {
+  const players = data.players || [];
+  $('group-title').textContent = kind === 'team' ? data.team : data.role_label;
+  $('group-sub').textContent =
+    `${kind === 'team' ? 'Team' : 'Role'} · ${plural(players.length)}`;
+
+  const list = $('group-list');
+  list.innerHTML = '';
+  if (!players.length) {
+    list.innerHTML = '<div class="no-data">No players in this group yet.</div>';
+    return;
+  }
+  players.forEach((p) => {
+    const card = document.createElement('button');
+    card.className = 'group-card';
+    const wr = p.win_pct == null ? '—' : `${p.win_pct}%`;
+    const streak = p.streak
+      ? `<span class="streak-badge ${p.streak.type}">` +
+        `${p.streak.length}-${p.streak.type === 'win' ? 'win' : 'loss'} streak</span>`
+      : '';
+    card.innerHTML =
+      `<div class="group-card-main">` +
+        `<span class="group-card-name">${p.name}</span>` +
+        `<span class="group-card-meta">${p.role_label} · ${p.team}</span>` +
+      `</div>` +
+      `<div class="group-card-perf">` +
+        `<span class="group-card-wr">${wr} WR <em>(${p.games} games)</em></span>` +
+        streak +
+        `<span class="rating-tag rating-${p.rating}">${RATING_LABEL[p.rating] || p.rating}</span>` +
+      `</div>`;
+    card.onclick = () => selectPlayer(p.name);
+    list.appendChild(card);
+  });
+}
+
 // ── Stats loading ────────────────────────────────────────────────────────────
 async function loadStats() {
   const data = await Api.stats(State.player, {
     season: State.season, split: State.split, champion: State.champion,
   });
   State.role = data.role;
+  State.team = data.team;
   State.lastStats = data;
   return data;
 }
@@ -178,8 +282,13 @@ function renderShell() {
     : '';
   $('player-meta').innerHTML =
     `<span class="tag tag-LCK">LCK</span>` +
-    `<span class="tag tag-role">${d.role_label}</span>` +
+    `<button type="button" class="tag tag-role tag-link" data-kind="role" data-key="${d.role}">${d.role_label}</button>` +
+    `<button type="button" class="tag tag-team tag-link" data-kind="team" data-key="${d.team}">${d.team}</button>` +
     streakTag;
+  // Role/team tags jump to that group's player list.
+  $('player-meta').querySelectorAll('.tag-link').forEach((b) => {
+    b.onclick = () => openGroup(b.dataset.kind, b.dataset.key);
+  });
   renderSeasonRow();
   renderSplitRow();
   renderOverall();
@@ -476,7 +585,9 @@ searchInput.addEventListener('keydown', (e) => {
     case 'Escape':    hideAutocomplete(); break;
     case 'Enter': {
       const items = $('ac-list').querySelectorAll('.ac-item');
-      if (acIndex >= 0 && items[acIndex]) selectPlayer(items[acIndex].dataset.name);
+      const it = (acIndex >= 0) ? items[acIndex] : null;
+      if (it) chooseEntry({ kind: it.dataset.kind, key: it.dataset.key,
+                            label: it.querySelector('.name').textContent });
       else doSearch();
       break;
     }
@@ -488,11 +599,20 @@ document.addEventListener('click', (e) => {
   if (!e.target.closest('.search-input-wrap')) hideAutocomplete();
 });
 
-$('back-btn').onclick = () => {
-  $('results').classList.add('hidden');
+function resetSearch() {
   $('search-input').value = '';
   hideAutocomplete();
   $('search-input').focus();
+}
+
+$('back-btn').onclick = () => {
+  $('results').classList.add('hidden');
+  resetSearch();
 };
 
-initPlayers();
+$('group-back-btn').onclick = () => {
+  $('group-view').classList.add('hidden');
+  resetSearch();
+};
+
+initSearch();

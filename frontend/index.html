@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>LCK Pro Player Stats</title>
-  <link rel="stylesheet" href="/static/css/style.css?v=6" />
+  <link rel="stylesheet" href="/static/css/style.css?v=7" />
 </head>
 <body>
   <header class="header">
@@ -24,12 +24,12 @@
     <!-- Search -->
     <section class="search-section">
       <div class="search-wrapper">
-        <label class="picker-label" for="search-input">Search a pro player</label>
+        <label class="picker-label" for="search-input">Search a player, team or role</label>
         <div style="display:flex; gap:10px;">
           <div class="search-input-wrap">
             <input id="search-input" class="search-input" type="text"
                    autocomplete="off"
-                   placeholder="Type a name: Teddy, Ruler, Kiin or Zeus"
+                   placeholder="Try a player (Teddy), team (Gen.G) or role (Top)"
                    role="combobox" aria-autocomplete="list" aria-expanded="false"
                    aria-controls="ac-list" />
             <ul id="ac-list" class="ac-list hidden" role="listbox"></ul>
@@ -85,6 +85,20 @@
         <div id="champ-table" class="cmp-wrap"></div>
       </div>
     </section>
+
+    <!-- Team / role group list -->
+    <section id="group-view" class="view hidden">
+      <button id="group-back-btn" class="back-btn">← New search</button>
+
+      <div id="group-header" class="group-header">
+        <div class="group-titles">
+          <div id="group-title" class="detail-name"></div>
+          <div id="group-sub" class="group-sub"></div>
+        </div>
+      </div>
+
+      <div id="group-list" class="group-list"></div>
+    </section>
   </main>
 
   <div id="loading" class="loading-overlay hidden">
@@ -92,7 +106,7 @@
     <div id="loading-msg">Loading…</div>
   </div>
 
-  <script src="/static/js/api.js?v=5"></script>
-  <script src="/static/js/app.js?v=5"></script>
+  <script src="/static/js/api.js?v=6"></script>
+  <script src="/static/js/app.js?v=6"></script>
 </body>
 </html>
