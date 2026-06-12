@@ -97,7 +97,15 @@ body {
 }
 .ac-item:hover, .ac-item.active { background: var(--bg3); }
 .ac-item.active { outline: 1px solid var(--accent); }
+.ac-item .name { flex: 1; }
 .ac-item .team { color: var(--text-muted); font-weight: 500; font-size: 13px; }
+.ac-kind {
+  flex: none; padding: 2px 7px; border-radius: 4px;
+  font-size: 10px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase;
+}
+.ac-kind-player { background: #1a3a5c; color: #58a6ff; }
+.ac-kind-team   { background: #2a2030; color: #d2a8ff; }
+.ac-kind-role   { background: #1a2a3a; color: #79c0ff; }
 
 .search-error {
   margin-top: 10px; color: var(--loss); font-size: 13px; font-weight: 600;
@@ -128,6 +136,45 @@ body {
 }
 .streak-badge.win { background: var(--win); color: #000; }
 .streak-badge.loss { background: var(--loss); color: #000; }
+
+/* Clickable role/team tags (button reset → looks like a tag). */
+.tag-link {
+  border: 1px solid transparent; cursor: pointer; font-family: inherit;
+  transition: border-color .15s, filter .15s;
+}
+.tag-link:hover { border-color: var(--accent); filter: brightness(1.15); }
+
+/* ── Team / role group view ──────────────────────────────── */
+.group-header {
+  display: flex; align-items: center; gap: 16px;
+  background: var(--bg2); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 20px 24px; margin-top: 12px;
+}
+.group-sub { color: var(--text-muted); font-size: 13px; font-weight: 600; }
+.group-list { display: flex; flex-direction: column; gap: 10px; margin-top: 16px; }
+.group-card {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  width: 100%; text-align: left; font-family: inherit; cursor: pointer;
+  background: var(--bg2); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 14px 18px;
+  transition: background .15s, border-color .15s;
+}
+.group-card:hover { background: var(--bg3); border-color: var(--accent); }
+.group-card-main { display: flex; flex-direction: column; gap: 3px; }
+.group-card-name { font-size: 17px; font-weight: 800; color: var(--text); }
+.group-card-meta { font-size: 13px; color: var(--text-muted); font-weight: 600; }
+.group-card-perf { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+.group-card-wr { font-size: 13px; font-weight: 700; color: var(--text); }
+.group-card-wr em { color: var(--text-muted); font-weight: 500; font-style: normal; }
+
+/* ── Performance rating tag ──────────────────────────────── */
+.rating-tag {
+  display: inline-block; padding: 2px 9px; border-radius: 4px;
+  font-size: 11px; font-weight: 700; letter-spacing: .5px;
+}
+.rating-strong     { background: rgba(63, 185, 80, .18);  color: var(--win); }
+.rating-average    { background: var(--bg3);              color: var(--text-muted); }
+.rating-struggling { background: rgba(248, 81, 73, .18);  color: var(--loss); }
 
 /* ── Detail hero + filters ───────────────────────────────── */
 .back-btn {

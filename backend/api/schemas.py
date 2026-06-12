@@ -107,10 +107,44 @@ class FiltersResponse(BaseModel):
     splits_by_season: dict[int, list[SplitOption]]
 
 
+class PlayerCard(BaseModel):
+    name: str
+    role: str
+    role_label: str
+    team: str
+    games: int
+    win_pct: float | None = None
+    streak: Streak | None = None
+    rating: str                        # "strong" / "average" / "struggling"
+
+
+class TeamInfo(BaseModel):
+    team: str
+    player_count: int
+
+
+class RoleInfo(BaseModel):
+    role: str
+    role_label: str
+    player_count: int
+
+
+class TeamGroupResponse(BaseModel):
+    team: str
+    players: list[PlayerCard] = []
+
+
+class RoleGroupResponse(BaseModel):
+    role: str
+    role_label: str
+    players: list[PlayerCard] = []
+
+
 class StatsResponse(BaseModel):
     player: str
     role: str
     role_label: str
+    team: str
     season: int | None = None
     split: str | None = None
     overall: Metrics

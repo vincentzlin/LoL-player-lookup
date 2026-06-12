@@ -54,6 +54,11 @@ def _seed_rows():
         _stat("g7", 2025, "Spring", "Doran", "KT", "top", "Gnar", 1, 3, 4),
         # Ruler (bot) — only 2025 LCK (his 2024 LPL data is excluded at load time)
         _stat("g8", 2025, "Spring", "Ruler", "Gen.G", "bot", "Aphelios", 7, 2, 5),
+        # Teddy (bot) — a transfer: older game on Kiwoom DRX, newer on HANJIN BRION.
+        # His displayed team should follow the most recent game (HANJIN BRION).
+        _stat("t1", 2025, "Summer", "Teddy", "Kiwoom DRX", "bot", "Jinx", 3, 2, 4),
+        _stat("t2", 2026, "Spring", "Teddy", "HANJIN BRION", "bot", "Jinx", 5, 1, 6,
+              result="Loss"),
     ] + _tier_streak_rows()
 
 

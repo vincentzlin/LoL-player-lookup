@@ -138,6 +138,71 @@ def test_empty_timeframe_is_graceful(client):
     assert d["champions"] == []
 
 
+def test_teams_list(client):
+    data = client.get("/api/teams").json()
+    counts = {t["team"]: t["player_count"] for t in data}
+    # Teams follow each player's most recent game: Teddy → HANJIN BRION (not his
+    # older Kiwoom DRX game), Ruler+Kiin → Gen.G, Zeus → T1 (seeded data).
+    assert counts == {"HANJIN BRION": 1, "Gen.G": 2, "T1": 1}
+
+
+def test_roles_list(client):
+    data = client.get("/api/roles").json()
+    assert [r["role"] for r in data] == ["top", "bot"]   # top→sup order, present only
+    assert {r["role"]: r["player_count"] for r in data} == {"top": 2, "bot": 2}
+
+
+def test_role_group_lists_players_with_cards(client):
+    d = client.get("/api/role/top").json()
+    assert d["role"] == "top" and d["role_label"] == "Top"
+    by_name = {p["name"]: p for p in d["players"]}
+    assert set(by_name) == {"Kiin", "Zeus"}
+    zeus = by_name["Zeus"]
+    assert zeus["team"] == "T1"
+    assert zeus["games"] == 5 and zeus["win_pct"] == 100.0   # all seeded games are wins
+    assert zeus["streak"] == {"type": "win", "length": 5}
+    assert zeus["rating"] in {"strong", "average", "struggling"}
+
+
+def test_team_group_lists_players(client):
+    d = client.get("/api/team/Gen.G").json()
+    assert d["team"] == "Gen.G"
+    by_name = {p["name"]: p for p in d["players"]}
+    assert set(by_name) == {"Ruler", "Kiin"}
+    ruler = by_name["Ruler"]
+    assert ruler["games"] == 1 and ruler["win_pct"] == 100.0
+    assert ruler["streak"] is None                          # single game, no 3+ streak
+
+
+def test_team_reflects_most_recent_game(client):
+    """Teddy transferred Kiwoom DRX → HANJIN BRION; the newer team is shown."""
+    assert client.get("/api/player/Teddy/stats").json()["team"] == "HANJIN BRION"
+
+    teams = {t["team"] for t in client.get("/api/teams").json()}
+    assert "HANJIN BRION" in teams and "Kiwoom DRX" not in teams
+
+    group = client.get("/api/team/HANJIN BRION").json()
+    assert [p["name"] for p in group["players"]] == ["Teddy"]
+
+
+def test_current_team_falls_back_without_games(client):
+    """current_team returns the supplied default when a player has no games."""
+    from backend.api import stats
+    from backend.database import get_session
+    with get_session() as session:
+        assert stats.current_team(session, "Nobody", "FALLBACK") == "FALLBACK"
+
+
+def test_unknown_team_and_role_are_404(client):
+    assert client.get("/api/team/Unknown").status_code == 404
+    assert client.get("/api/role/jng").status_code == 404
+
+
+def test_player_stats_includes_team(client):
+    d = client.get("/api/player/Ruler/stats").json()
+    assert d["team"] == "Gen.G"
+
+
 def test_frontend_served_with_no_cache(client):
     r = client.get("/")
     assert r.status_code == 200

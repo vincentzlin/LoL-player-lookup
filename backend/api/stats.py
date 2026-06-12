@@ -3,7 +3,7 @@ from statistics import mean
 
 from sqlalchemy.orm import Session, Query
 
-from backend.config import SEASONS, ROLE_LABELS
+from backend.config import SEASONS, ROLE_LABELS, PLAYERS
 from backend.database import PlayerGameStat
 from backend.champions import image_url
 
@@ -336,3 +336,74 @@ def _split_buttons(splits: list[str]) -> list[dict]:
 
 def role_label(role: str) -> str:
     return ROLE_LABELS.get(role, role)
+
+
+# ── Team / role group cards (VIN-14) ─────────────────────────────────────────
+
+# champion_tier "top"/"bottom" → a player-level performance rating.
+_RATING_FROM_TIER = {"top": "strong", "bottom": "struggling"}
+
+
+def current_team(session: Session, name: str, default: str | None = None) -> str | None:
+    """The player's most recent team (by game date), or `default` if no games."""
+    row = (session.query(PlayerGameStat.teamname)
+           .filter(PlayerGameStat.playername == name)
+           .order_by(PlayerGameStat.date.desc())
+           .first())
+    return row[0] if row and row[0] else default
+
+
+def current_teams(session: Session) -> dict[str, str | None]:
+    """Most-recent team for every allowlist player (config team is the fallback)."""
+    return {p["name"]: current_team(session, p["name"], p["team"]) for p in PLAYERS}
+
+
+def distinct_teams(session: Session) -> list[str | None]:
+    """De-duplicated current teams across the allowlist, in PLAYERS order."""
+    cmap = current_teams(session)
+    seen: list[str | None] = []
+    for p in PLAYERS:
+        if cmap[p["name"]] not in seen:
+            seen.append(cmap[p["name"]])
+    return seen
+
+
+def player_card(session: Session, player: dict) -> dict:
+    """A compact performance snapshot for a team/role list entry.
+
+    Uses the player's full LCK history (no timeframe filter): win rate, current
+    win/loss streak, and a Strong/Average/Struggling rating derived from the same
+    composite-vs-role-baseline logic used for champion tiers.
+    """
+    name, role = player["name"], player["role"]
+    rows = player_rows(session, name)
+    games = len(rows)
+    wins = sum(1 for r in rows if r.result == "Win")
+    win_pct = round(wins / games * 100, 1) if games else None
+
+    baseline = lck_role_baseline(session, role)
+    tier = champion_tier(metrics_from_rows(rows), baseline)
+
+    return {
+        "name": name,
+        "role": role,
+        "role_label": role_label(role),
+        "team": current_team(session, name, player["team"]),
+        "games": games,
+        "win_pct": win_pct,
+        "streak": current_streak(rows),
+        "rating": _RATING_FROM_TIER.get(tier, "average"),
+    }
+
+
+def team_group(session: Session, team: str) -> dict:
+    """All allowlist players whose most-recent team is `team`, with their cards."""
+    cmap = current_teams(session)
+    players = [player_card(session, p) for p in PLAYERS if cmap[p["name"]] == team]
+    return {"team": team, "players": players}
+
+
+def role_group(session: Session, role: str) -> dict:
+    """All allowlist players in `role`, with their performance cards."""
+    players = [player_card(session, p) for p in PLAYERS if p["role"] == role]
+    return {"role": role, "role_label": role_label(role), "players": players}
