@@ -140,6 +140,33 @@ class RoleGroupResponse(BaseModel):
     players: list[PlayerCard] = []
 
 
+class ChampionInfo(BaseModel):
+    champion: str
+    champion_ddragon: str = ""
+    image_url: str = ""
+
+
+class GraphEdge(BaseModel):
+    champion: str
+    champion_ddragon: str = ""
+    image_url: str = ""
+    weight: float                      # skill-adjusted win-margin %, signed
+    games: int                         # number of games this pair shared
+
+
+class ChampionGraphResponse(BaseModel):
+    champion: str
+    champion_ddragon: str = ""
+    image_url: str = ""
+    season: int | None = None
+    split: str | None = None
+    games: int = 0
+    win_rate: float | None = None          # raw wins / games %
+    adjusted_win_rate: float | None = None  # skill-adjusted (50% + avg margin)
+    synergies: list[GraphEdge] = []    # best (+) → worst (−) teammates
+    counters: list[GraphEdge] = []     # favourable (+) → unfavourable (−)
+
+
 class StatsResponse(BaseModel):
     player: str
     role: str

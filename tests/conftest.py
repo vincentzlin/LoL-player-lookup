@@ -59,7 +59,7 @@ def _seed_rows():
         _stat("t1", 2025, "Summer", "Teddy", "Kiwoom DRX", "bot", "Jinx", 3, 2, 4),
         _stat("t2", 2026, "Spring", "Teddy", "HANJIN BRION", "bot", "Jinx", 5, 1, 6,
               result="Loss"),
-    ] + _tier_streak_rows()
+    ] + _tier_streak_rows() + _draft_rows()
 
 
 # Strong / weak rate-stat kwargs for tier tests (relative to the avg opponents).
@@ -93,6 +93,56 @@ def _tier_streak_rows():
         _stat("o3", 2026, "Spring", "Kingen", "DK", "top", "Aatrox", 3, 3, 3, **_AVG),
         _stat("o4", 2026, "Spring", "Kingen", "DK", "top", "Aatrox", 3, 3, 3, **_AVG),
     ]
+
+
+def _draft_stat(gameid, side, team, pos, champ, result, split="Spring"):
+    """A full-game roster row for the draft-graph tests (carries side + result)."""
+    return PlayerGameStat(
+        gameid=gameid, league="LCK", year=2024, split=split, playoffs=False,
+        date="2024-02-01", playername=f"{team}_{pos}", teamname=team, side=side,
+        position=pos, champion=champ, champion_ddragon=to_ddragon_id(champ),
+        kills=3, deaths=3, assists=3, gamelength_s=1800, totalgold=12000,
+        cspm=8.0, dpm=480.0, damageshare=0.2, earnedgoldshare=0.2,
+        result=result, datacompleteness="complete",
+    )
+
+
+# Two isolated 2024 'Spring' games for the champion graph model. Each team plays
+# only twice (< MIN_TEAM_GAMES), so every team rating is the average (0) and each
+# side's skill-adjusted margin is a clean ±0.5 — making edge signs deterministic.
+# Alpha (Darius/.../Ashe/Lulu) beats Bravo (Teemo/...) both games, so Ashe+Lulu
+# get a positive synergy and Darius gets a favourable counter vs Teemo.
+_ALPHA = [("top", "Darius"), ("jng", "Sejuani"), ("mid", "Orianna"),
+          ("bot", "Ashe"), ("sup", "Lulu")]
+_BRAVO = [("top", "Teemo"), ("jng", "Vi"), ("mid", "Syndra"),
+          ("bot", "Jinx"), ("sup", "Thresh")]
+
+
+def _draft_rows():
+    rows = []
+    for gid in ("d1", "d2"):
+        for pos, champ in _ALPHA:
+            rows.append(_draft_stat(gid, "Blue", "Alpha", pos, champ, "Win"))
+        for pos, champ in _BRAVO:
+            rows.append(_draft_stat(gid, "Red", "Bravo", pos, champ, "Loss"))
+    return rows + _strong_team_rows()
+
+
+def _strong_team_rows():
+    """A strong team (Titan) for the adjusted-win-rate test, in 2024 'Summer'.
+
+    Titan plays 5 games (>= MIN_TEAM_GAMES) on champion Riven, winning 4 → an 80%
+    raw win rate and a positive rating (expected score 0.8). Each opponent plays only
+    once (rating 0). So Riven merely *meets* expectations: its skill-adjusted win rate
+    recenters to 50%, well below the 80% raw rate.
+    """
+    rows = []
+    results = ["Win", "Win", "Win", "Win", "Loss"]
+    for i, res in enumerate(results, start=1):
+        opp_res = "Loss" if res == "Win" else "Win"
+        rows.append(_draft_stat(f"s{i}", "Blue", "Titan", "mid", "Riven", res, split="Summer"))
+        rows.append(_draft_stat(f"s{i}", "Red", f"Opp{i}", "mid", "Poppy", opp_res, split="Summer"))
+    return rows
 
 
 @pytest.fixture(scope="session")

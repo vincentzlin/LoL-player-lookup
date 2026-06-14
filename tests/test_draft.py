@@ -1,0 +1,118 @@
+"""Tests for the champion draft graph model (VIN-20).
+
+Seeded data (see conftest ``_draft_rows``): two 2024 'Spring' games where team
+Alpha (Darius / Sejuani / Orianna / Ashe / Lulu) beats team Bravo (Teemo / Vi /
+Syndra / Jinx / Thresh). Every team has only 2 games (< MIN_TEAM_GAMES), so all
+ratings are 0, the expected score is 0.5, and each margin is ±0.5. With K_SHRINK=6
+a pair seen twice on the winning side has weight 0.5*2/(2+6)*100 = 12.5%.
+
+The endpoints query season 14 (= 2024) Spring to isolate this data.
+"""
+from backend.api import draft
+
+TF = {"season": 14, "split": "Spring"}
+EXPECTED_W = 12.5     # 0.5 * 2 / (2 + draft.K_SHRINK) * 100
+
+
+# ── Pure skill-adjustment math ────────────────────────────────────────────────
+
+def test_expected_score_symmetry_and_direction():
+    assert draft.expected_score(0, 0) == 0.5
+    assert draft.expected_score(400, 0) > 0.5          # stronger team favoured
+    assert draft.expected_score(0, 400) < 0.5
+
+
+def test_strong_win_counts_less_than_an_upset():
+    """A favourite winning earns a smaller margin than an underdog upset."""
+    strong, weak = 400.0, -400.0
+    favourite_win_margin = 1.0 - draft.expected_score(strong, weak)
+    upset_win_margin = 1.0 - draft.expected_score(weak, strong)
+    assert favourite_win_margin < 0.5 < upset_win_margin
+
+
+def test_rating_from_winrate_needs_min_games():
+    assert draft._rating_from_winrate(3, 3) == 0.0     # under MIN_TEAM_GAMES
+    assert draft._rating_from_winrate(8, 10) > 0.0     # 80% over enough games
+    assert draft._rating_from_winrate(2, 10) < 0.0     # 20%
+
+
+# ── /api/champions ────────────────────────────────────────────────────────────
+
+def test_champions_endpoint_lists_seeded_champions(client):
+    champs = {c["champion"]: c for c in client.get("/api/champions").json()}
+    assert {"Darius", "Ashe", "Lulu", "Teemo"} <= set(champs)
+    assert champs["Ashe"]["image_url"].endswith("/Ashe.png")
+
+
+def test_unknown_champion_is_404(client):
+    assert client.get("/api/champion/NotAChampion/graph").status_code == 404
+
+
+def test_champion_lookup_is_case_insensitive(client):
+    d = client.get("/api/champion/darius/graph", params=TF).json()
+    assert d["champion"] == "Darius"
+
+
+# ── Synergy edges ─────────────────────────────────────────────────────────────
+
+def test_synergy_is_positive_for_winning_teammates(client):
+    d = client.get("/api/champion/Ashe/graph", params=TF).json()
+    syn = {e["champion"]: e for e in d["synergies"]}
+    assert "Lulu" in syn
+    assert syn["Lulu"]["weight"] == EXPECTED_W
+    assert syn["Lulu"]["games"] == 2
+
+
+def test_synergy_excludes_opponents(client):
+    """Teemo (enemy) must not appear among Ashe's synergies."""
+    d = client.get("/api/champion/Ashe/graph", params=TF).json()
+    assert "Teemo" not in {e["champion"] for e in d["synergies"]}
+
+
+# ── Counter edges ─────────────────────────────────────────────────────────────
+
+def test_counter_is_favourable_for_the_winning_side(client):
+    d = client.get("/api/champion/Darius/graph", params=TF).json()
+    cnt = {e["champion"]: e for e in d["counters"]}
+    assert cnt["Teemo"]["weight"] == EXPECTED_W       # Darius's side beat Teemo's
+
+
+def test_counter_is_antisymmetric(client):
+    darius = {e["champion"]: e["weight"]
+              for e in client.get("/api/champion/Darius/graph", params=TF).json()["counters"]}
+    teemo = {e["champion"]: e["weight"]
+             for e in client.get("/api/champion/Teemo/graph", params=TF).json()["counters"]}
+    assert darius["Teemo"] == -teemo["Darius"]
+
+
+def test_losing_side_has_negative_edges(client):
+    d = client.get("/api/champion/Teemo/graph", params=TF).json()
+    syn = {e["champion"]: e["weight"] for e in d["synergies"]}
+    assert syn["Vi"] == -EXPECTED_W                    # lost together both games
+
+
+def test_synergies_include_worst_teammates(client):
+    """Synergies now span best→worst; a losing champ's edges are all negative."""
+    d = client.get("/api/champion/Jinx/graph", params=TF).json()
+    assert d["synergies"]                               # not empty
+    assert all(e["weight"] < 0 for e in d["synergies"])
+
+
+# ── Win rates ─────────────────────────────────────────────────────────────────
+
+def test_win_rate_and_adjusted_for_neutral_strength(client):
+    """All teams here have 2 games (rating 0, expected 0.5) → adjusted == raw."""
+    ashe = client.get("/api/champion/Ashe/graph", params=TF).json()
+    assert ashe["games"] == 2
+    assert ashe["win_rate"] == 100.0 and ashe["adjusted_win_rate"] == 100.0
+    jinx = client.get("/api/champion/Jinx/graph", params=TF).json()
+    assert jinx["win_rate"] == 0.0 and jinx["adjusted_win_rate"] == 0.0
+
+
+def test_adjusted_win_rate_recenters_for_a_strong_team(client):
+    """Riven rides a strong team (80% raw) but only meets expectations → adj 50%."""
+    d = client.get("/api/champion/Riven/graph",
+                   params={"season": 14, "split": "Summer"}).json()
+    assert d["win_rate"] == 80.0
+    assert d["adjusted_win_rate"] == 50.0
+    assert d["adjusted_win_rate"] < d["win_rate"]

@@ -110,9 +110,10 @@ body {
   flex: none; padding: 2px 7px; border-radius: 4px;
   font-size: 10px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase;
 }
-.ac-kind-player { background: #1a3a5c; color: #58a6ff; }
-.ac-kind-team   { background: #2a2030; color: #d2a8ff; }
-.ac-kind-role   { background: #1a2a3a; color: #79c0ff; }
+.ac-kind-player   { background: #1a3a5c; color: #58a6ff; }
+.ac-kind-team     { background: #2a2030; color: #d2a8ff; }
+.ac-kind-role     { background: #1a2a3a; color: #79c0ff; }
+.ac-kind-champion { background: #2a2415; color: var(--gold); }
 
 .search-error {
   margin-top: 10px; color: var(--loss); font-size: 13px; font-weight: 600;
@@ -269,6 +270,49 @@ table.cmp tr:hover td { background: rgba(255,255,255,.02); }
 }
 .champ-card-name { font-size: 12px; font-weight: 700; text-align: center; }
 .champ-card-games { font-size: 11px; color: var(--text-muted); }
+
+/* ── Champion draft graph (VIN-20) ───────────────────────── */
+.champ-back { margin-bottom: 14px; }
+.champ-hero { display: flex; align-items: center; gap: 16px; }
+.champ-hero-img {
+  width: 64px; height: 64px; border-radius: 10px; background: var(--bg);
+  object-fit: cover; border: 1px solid var(--border);
+}
+.graph-link {
+  margin-left: 8px; background: none; border: 1px solid var(--border);
+  color: var(--accent); font: inherit; font-size: 11px; font-weight: 700;
+  text-transform: none; letter-spacing: 0; padding: 3px 10px;
+  border-radius: 999px; cursor: pointer; transition: border-color .15s, background .15s;
+}
+.graph-link:hover { border-color: var(--accent); background: var(--bg3); }
+
+.champ-stats { display: flex; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+.champ-stat {
+  display: flex; flex-direction: column; gap: 2px;
+  background: var(--bg3); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 8px 14px; min-width: 92px;
+}
+.champ-stat-label {
+  font-size: 10px; font-weight: 700; letter-spacing: .6px; text-transform: uppercase;
+  color: var(--text-muted);
+}
+.champ-stat-val { font-size: 18px; font-weight: 800; color: var(--text); }
+
+.edge-list {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 8px;
+}
+.edge-row {
+  display: flex; align-items: center; gap: 10px;
+  background: var(--bg3); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 8px 12px;
+}
+.edge-row img {
+  width: 34px; height: 34px; border-radius: 6px; background: var(--bg); object-fit: cover;
+}
+.edge-name { font-weight: 700; font-size: 13px; flex: 1; }
+.edge-weight { font-weight: 800; font-size: 14px; }
+.edge-games { font-size: 11px; color: var(--text-muted); width: 56px; text-align: right; }
 
 /* ── Match history ───────────────────────────────────────── */
 .match-history { display: flex; flex-direction: column; gap: 10px; }
