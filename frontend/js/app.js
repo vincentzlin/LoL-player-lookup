@@ -19,6 +19,11 @@ const State = { player: null, role: null, team: null, season: null, split: null,
 
 const $ = (id) => document.getElementById(id);
 
+// True when an API call failed because the backend is unreachable (down / 5xx),
+// as opposed to a genuine 404 for an unknown player/team/champion.
+const SERVER_DOWN_MSG = "Can't reach the server — is run.py running?";
+const isServerDown = (e) => !!e && e.message === 'SERVER_UNREACHABLE';
+
 function fmt(v, m) {
   if (v == null) return '—';
   const n = Number(v).toFixed(m.dp);
@@ -45,8 +50,8 @@ function hideLoading() { $('loading').classList.add('hidden'); }
 // API needs (player name / team name / role code); `label` is what we match & show.
 let SEARCH_INDEX = [];
 
-const KIND_LABEL = { player: 'Player', team: 'Team', role: 'Role' };
-const KIND_ORDER = { player: 0, team: 1, role: 2 };
+const KIND_LABEL = { player: 'Player', team: 'Team', role: 'Role', champion: 'Champion' };
+const KIND_ORDER = { player: 0, team: 1, role: 2, champion: 3 };
 
 function plural(n) { return `${n} player${n === 1 ? '' : 's'}`; }
 
@@ -54,6 +59,9 @@ async function initSearch() {
   const [players, teams, roles] = await Promise.all([
     Api.players(), Api.teams(), Api.roles(),
   ]);
+  // Champions are an enhancement — never let their failure break player search.
+  let champions = [];
+  try { champions = await Api.champions(); } catch (e) { champions = []; }
   SEARCH_INDEX = [
     ...players.map((p) => ({ kind: 'player', key: p.name, label: p.name,
                              sub: `${p.role_label} · ${p.team}` })),
@@ -61,6 +69,8 @@ async function initSearch() {
                            sub: plural(t.player_count) })),
     ...roles.map((r) => ({ kind: 'role', key: r.role, label: r.role_label,
                            sub: plural(r.player_count) })),
+    ...champions.map((c) => ({ kind: 'champion', key: c.champion, label: c.champion,
+                              sub: 'synergies & counters' })),
   ];
 
   const chips = $('player-chips');
@@ -153,6 +163,7 @@ function chooseEntry(e) {
   $('search-input').value = e.label;
   hideAutocomplete();
   if (e.kind === 'player') loadPlayer(e.key);
+  else if (e.kind === 'champion') openChampion(e.key, { fromSearch: true });
   else openGroup(e.kind, e.key);
 }
 
@@ -196,7 +207,9 @@ async function loadPlayer(name) {
     $('group-view').classList.add('hidden');
     $('results').classList.remove('hidden');
   } catch (e) {
-    err.textContent = `"${name}" isn't searchable. Try: Teddy, Ruler, Kiin or Zeus.`;
+    err.textContent = isServerDown(e)
+      ? SERVER_DOWN_MSG
+      : `"${name}" isn't searchable. Try: Teddy, Ruler, Kiin or Zeus.`;
     err.classList.remove('hidden');
     $('results').classList.add('hidden');
   } finally {
@@ -219,7 +232,7 @@ async function openGroup(kind, key) {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   } catch (e) {
     const err = $('search-error');
-    err.textContent = `Couldn't load that ${kind}.`;
+    err.textContent = isServerDown(e) ? SERVER_DOWN_MSG : `Couldn't load that ${kind}.`;
     err.classList.remove('hidden');
   } finally {
     hideLoading();
@@ -259,6 +272,86 @@ function renderGroup(kind, data) {
     card.onclick = () => selectPlayer(p.name);
     list.appendChild(card);
   });
+}
+
+// ── Champion draft graph (VIN-20) ─────────────────────────────────────────────
+// Where "← Back" returns to: a player profile (if opened from there) or home.
+let champReturn = 'home';
+
+async function openChampion(name, { fromSearch = false } = {}) {
+  champReturn = fromSearch ? 'home' : (State.player ? 'results' : 'home');
+  // Inherit the player's current timeframe; a search-opened champion uses all data.
+  const tf = fromSearch ? {} : { season: State.season, split: State.split };
+  hideAutocomplete();
+  $('search-error').classList.add('hidden');
+  showLoading('Loading champion…');
+  try {
+    const data = await Api.championGraph(name, tf);
+    renderChampionGraph(data, tf);
+    $('results').classList.add('hidden');
+    $('group-view').classList.add('hidden');
+    $('champion-view').classList.remove('hidden');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  } catch (e) {
+    const err = $('search-error');
+    err.textContent = isServerDown(e)
+      ? SERVER_DOWN_MSG
+      : `Couldn't load the champion graph for "${name}".`;
+    err.classList.remove('hidden');
+  } finally {
+    hideLoading();
+  }
+}
+
+// One ranked edge row: champion portrait, name, signed win-margin %, sample size.
+function edgeRow(e) {
+  const cls = e.weight > 0 ? 'delta-pos' : (e.weight < 0 ? 'delta-neg' : 'delta-flat');
+  const sign = e.weight > 0 ? '+' : '';
+  return `<div class="edge-row">` +
+    `<img src="${e.image_url}" alt="${e.champion}" onerror="this.style.visibility='hidden'" />` +
+    `<span class="edge-name">${e.champion}</span>` +
+    `<span class="edge-weight ${cls}">${sign}${e.weight.toFixed(1)}%</span>` +
+    `<span class="edge-games">${e.games} game${e.games === 1 ? '' : 's'}</span>` +
+  `</div>`;
+}
+
+function edgeList(edges, emptyMsg) {
+  if (!edges || !edges.length) return `<div class="no-data">${emptyMsg}</div>`;
+  return `<div class="edge-list">${edges.map(edgeRow).join('')}</div>`;
+}
+
+// One hero stat: label + value, optionally coloured vs a 50% midpoint.
+function statChip(label, value, { pct = false, vs50 = false } = {}) {
+  const txt = value == null ? '—' : (pct ? `${value.toFixed(1)}%` : value);
+  let cls = '';
+  if (vs50 && value != null) cls = value > 50 ? ' delta-pos' : (value < 50 ? ' delta-neg' : '');
+  return `<div class="champ-stat"><span class="champ-stat-label">${label}</span>` +
+    `<span class="champ-stat-val${cls}">${txt}</span></div>`;
+}
+
+function renderChampionGraph(d, tf) {
+  $('champ-hero-img').src = d.image_url || '';
+  $('champ-hero-name').textContent = d.champion;
+  const seasonTxt = tf && tf.season != null ? `Season ${tf.season}` : 'All seasons';
+  const splitTxt = tf && tf.split ? ` · ${tf.split}` : '';
+  $('champ-hero-sub').textContent = `LCK draft graph · ${seasonTxt}${splitTxt}`;
+  $('champ-hero-stats').innerHTML =
+    statChip('Games', d.games) +
+    statChip('Win rate', d.win_rate, { pct: true, vs50: true }) +
+    statChip('Adjusted WR', d.adjusted_win_rate, { pct: true, vs50: true });
+  $('champ-synergies').innerHTML =
+    edgeList(d.synergies, 'No shared games in this timeframe.');
+  $('champ-counters').innerHTML =
+    edgeList(d.counters, 'No matchups in this timeframe.');
+}
+
+function champBack() {
+  $('champion-view').classList.add('hidden');
+  if (champReturn === 'results' && State.player) {
+    $('results').classList.remove('hidden');
+  } else {
+    goHome();
+  }
 }
 
 // ── Stats loading ────────────────────────────────────────────────────────────
@@ -550,8 +643,12 @@ function renderChampDetail() {
   if (!State.champion || !d.selected_champion) { sec.classList.add('hidden'); return; }
   sec.classList.remove('hidden');
   const sc = d.selected_champion;
-  $('champ-detail-title').textContent =
-    `${sc.champion} (${sc.games} games) — player vs LCK ${d.role_label} avg vs player overall`;
+  $('champ-detail-title').innerHTML =
+    `${sc.champion} (${sc.games} games) — player vs LCK ${d.role_label} avg vs player overall ` +
+    `<button type="button" class="graph-link" data-champ="${sc.champion}">` +
+    `View synergies &amp; counters →</button>`;
+  $('champ-detail-title').querySelector('.graph-link').onclick =
+    () => openChampion(sc.champion);
 
   const cols = [
     { label: `On ${sc.champion}`, cls: 'col-player' },
@@ -608,9 +705,11 @@ function resetSearch() {
 function goHome() {
   $('results').classList.add('hidden');
   $('group-view').classList.add('hidden');
+  $('champion-view').classList.add('hidden');
   resetSearch();
 }
 
 $('home-btn').onclick = goHome;
+$('champ-back').onclick = champBack;
 
 initSearch();

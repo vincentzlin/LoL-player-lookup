@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>LCK Pro Player Stats</title>
-  <link rel="stylesheet" href="/static/css/style.css?v=8" />
+  <link rel="stylesheet" href="/static/css/style.css?v=10" />
 </head>
 <body>
   <header class="header">
@@ -95,6 +95,32 @@
 
       <div id="group-list" class="group-list"></div>
     </section>
+
+    <!-- Champion draft graph (VIN-20) -->
+    <section id="champion-view" class="view hidden">
+      <div class="detail-hero">
+        <button id="champ-back" class="pill champ-back" type="button">← Back</button>
+        <div class="champ-hero">
+          <img id="champ-hero-img" class="champ-hero-img" alt=""
+               onerror="this.style.visibility='hidden'" />
+          <div>
+            <div id="champ-hero-name" class="detail-name"></div>
+            <div id="champ-hero-sub" class="group-sub"></div>
+            <div id="champ-hero-stats" class="champ-stats"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="detail-section wide">
+        <h3>Synergies <span class="hint">— best &amp; worst teammates (skill-adjusted win margin)</span></h3>
+        <div id="champ-synergies"></div>
+      </div>
+
+      <div class="detail-section wide">
+        <h3>Counters <span class="hint">— matchups (positive = favourable, negative = countered)</span></h3>
+        <div id="champ-counters"></div>
+      </div>
+    </section>
   </main>
 
   <div id="loading" class="loading-overlay hidden">
@@ -102,7 +128,7 @@
     <div id="loading-msg">Loading…</div>
   </div>
 
-  <script src="/static/js/api.js?v=6"></script>
-  <script src="/static/js/app.js?v=6"></script>
+  <script src="/static/js/api.js?v=10"></script>
+  <script src="/static/js/app.js?v=10"></script>
 </body>
 </html>

@@ -1,8 +1,15 @@
 // Thin fetch wrapper around the backend API.
 const Api = {
   async _get(url) {
-    const res = await fetch(url);
+    let res;
+    try {
+      res = await fetch(url);
+    } catch (_) {
+      // fetch only rejects on network-level failures (server down, no connection).
+      throw new Error('SERVER_UNREACHABLE');
+    }
     if (!res.ok) {
+      if (res.status >= 500) throw new Error('SERVER_UNREACHABLE');
       let detail = res.statusText;
       try { detail = (await res.json()).detail || detail; } catch (_) {}
       throw new Error(detail);
@@ -12,6 +19,14 @@ const Api = {
   players() { return this._get('/api/players'); },
   teams() { return this._get('/api/teams'); },
   roles() { return this._get('/api/roles'); },
+  champions() { return this._get('/api/champions'); },
+  championGraph(name, { season, split } = {}) {
+    const p = new URLSearchParams();
+    if (season != null) p.set('season', season);
+    if (split) p.set('split', split);
+    const qs = p.toString();
+    return this._get(`/api/champion/${encodeURIComponent(name)}/graph${qs ? '?' + qs : ''}`);
+  },
   teamGroup(team) { return this._get(`/api/team/${encodeURIComponent(team)}`); },
   roleGroup(role) { return this._get(`/api/role/${encodeURIComponent(role)}`); },
   match(gameid) { return this._get(`/api/match/${encodeURIComponent(gameid)}`); },

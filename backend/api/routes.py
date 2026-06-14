@@ -3,10 +3,11 @@ from fastapi import APIRouter, HTTPException, Query
 
 from backend.config import PLAYERS, find_player, distinct_roles
 from backend.database import get_session
-from backend.api import stats
+from backend.api import stats, draft
 from backend.api.schemas import (
     PlayerInfo, FiltersResponse, StatsResponse, Metrics, ChampionMetrics, Streak,
     MatchSummary, MatchDetail, TeamInfo, RoleInfo, TeamGroupResponse, RoleGroupResponse,
+    ChampionInfo, ChampionGraphResponse,
 )
 
 router = APIRouter(prefix="/api")
@@ -56,6 +57,26 @@ def role_group(role: str):
         raise HTTPException(status_code=404, detail=f"'{role}' is not a known role.")
     with get_session() as session:
         return stats.role_group(session, role)
+
+
+@router.get("/champions", response_model=list[ChampionInfo])
+def list_champions():
+    with get_session() as session:
+        return [ChampionInfo(**c) for c in draft.list_champions(session)]
+
+
+@router.get("/champion/{name}/graph", response_model=ChampionGraphResponse)
+def champion_graph(
+    name: str,
+    season: int | None = Query(None),
+    split: str | None = Query(None),
+):
+    with get_session() as session:
+        champ = draft.canonical_champion(session, name)
+        if champ is None:
+            raise HTTPException(status_code=404,
+                                detail=f"'{name}' is not a known LCK champion.")
+        return ChampionGraphResponse(**draft.champion_graph(session, champ, season, split))
 
 
 def _require_player(name: str) -> dict:
