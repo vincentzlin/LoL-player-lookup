@@ -4,16 +4,16 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>LCK Pro Player Stats</title>
-  <link rel="stylesheet" href="/static/css/style.css?v=7" />
+  <link rel="stylesheet" href="/static/css/style.css?v=8" />
 </head>
 <body>
   <header class="header">
     <div class="header-inner">
-      <div class="logo">
+      <button id="home-btn" class="logo" type="button" aria-label="Home — new search">
         <span class="logo-icon">🏆</span>
         <span class="logo-text">LCK PRO STATS</span>
         <span class="logo-badge">PRO PLAY</span>
-      </div>
+      </button>
       <div class="header-actions">
         <span class="db-status">Teddy · Ruler · Kiin · Zeus</span>
       </div>
@@ -43,8 +43,6 @@
 
     <!-- Results -->
     <section id="results" class="view hidden">
-      <button id="back-btn" class="back-btn">← New search</button>
-
       <div class="detail-hero">
         <div class="detail-hero-info">
           <div id="player-name" class="detail-name"></div>
@@ -88,8 +86,6 @@
 
     <!-- Team / role group list -->
     <section id="group-view" class="view hidden">
-      <button id="group-back-btn" class="back-btn">← New search</button>
-
       <div id="group-header" class="group-header">
         <div class="group-titles">
           <div id="group-title" class="detail-name"></div>

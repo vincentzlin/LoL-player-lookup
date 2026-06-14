@@ -605,14 +605,12 @@ function resetSearch() {
   $('search-input').focus();
 }
 
-$('back-btn').onclick = () => {
+function goHome() {
   $('results').classList.add('hidden');
-  resetSearch();
-};
-
-$('group-back-btn').onclick = () => {
   $('group-view').classList.add('hidden');
   resetSearch();
-};
+}
+
+$('home-btn').onclick = goHome;
 
 initSearch();
