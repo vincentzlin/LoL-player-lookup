@@ -277,26 +277,37 @@ function renderGroup(kind, data) {
 // ── Champion draft graph (VIN-20) ─────────────────────────────────────────────
 // Where "← Back" returns to: a player profile (if opened from there) or home.
 let champReturn = 'home';
+// Selected champion + timeframe + role (null = all roles) for the champion view.
+const champState = { name: null, tf: {}, role: null };
 
-async function openChampion(name, { fromSearch = false } = {}) {
+function openChampion(name, { fromSearch = false } = {}) {
   champReturn = fromSearch ? 'home' : (State.player ? 'results' : 'home');
+  champState.name = name;
   // Inherit the player's current timeframe; a search-opened champion uses all data.
-  const tf = fromSearch ? {} : { season: State.season, split: State.split };
+  champState.tf = fromSearch ? {} : { season: State.season, split: State.split };
+  champState.role = null;
+  return loadChampionGraph(true);
+}
+
+async function loadChampionGraph(switchView) {
   hideAutocomplete();
   $('search-error').classList.add('hidden');
   showLoading('Loading champion…');
   try {
-    const data = await Api.championGraph(name, tf);
-    renderChampionGraph(data, tf);
-    $('results').classList.add('hidden');
-    $('group-view').classList.add('hidden');
-    $('champion-view').classList.remove('hidden');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    const data = await Api.championGraph(champState.name,
+      { ...champState.tf, role: champState.role });
+    renderChampionGraph(data);
+    if (switchView) {
+      $('results').classList.add('hidden');
+      $('group-view').classList.add('hidden');
+      $('champion-view').classList.remove('hidden');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
   } catch (e) {
     const err = $('search-error');
     err.textContent = isServerDown(e)
       ? SERVER_DOWN_MSG
-      : `Couldn't load the champion graph for "${name}".`;
+      : `Couldn't load the champion graph for "${champState.name}".`;
     err.classList.remove('hidden');
   } finally {
     hideLoading();
@@ -329,7 +340,22 @@ function statChip(label, value, { pct = false, vs50 = false } = {}) {
     `<span class="champ-stat-val${cls}">${txt}</span></div>`;
 }
 
-function renderChampionGraph(d, tf) {
+function renderChampRoleRow(d) {
+  const row = $('champ-role-row');
+  row.innerHTML = '';
+  const addPill = (label, roleVal) => {
+    const b = document.createElement('button');
+    b.className = 'pill' + (champState.role === roleVal ? ' active' : '');
+    b.textContent = label;
+    b.onclick = () => { champState.role = roleVal; loadChampionGraph(false); };
+    row.appendChild(b);
+  };
+  addPill('All roles', null);
+  (d.roles || []).forEach((r) => addPill(`${r.role_label} · ${r.games}g`, r.role));
+}
+
+function renderChampionGraph(d) {
+  const tf = champState.tf;
   $('champ-hero-img').src = d.image_url || '';
   $('champ-hero-name').textContent = d.champion;
   const seasonTxt = tf && tf.season != null ? `Season ${tf.season}` : 'All seasons';
@@ -339,10 +365,11 @@ function renderChampionGraph(d, tf) {
     statChip('Games', d.games) +
     statChip('Win rate', d.win_rate, { pct: true, vs50: true }) +
     statChip('Adjusted WR', d.adjusted_win_rate, { pct: true, vs50: true });
+  renderChampRoleRow(d);
   $('champ-synergies').innerHTML =
-    edgeList(d.synergies, 'No shared games in this timeframe.');
+    edgeList(d.synergies, 'No teammates with 3+ games together in this timeframe.');
   $('champ-counters').innerHTML =
-    edgeList(d.counters, 'No matchups in this timeframe.');
+    edgeList(d.counters, 'No matchups with 3+ games in this timeframe.');
 }
 
 function champBack() {

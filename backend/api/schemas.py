@@ -154,12 +154,22 @@ class GraphEdge(BaseModel):
     games: int                         # number of games this pair shared
 
 
+class ChampionRole(BaseModel):
+    role: str
+    role_label: str
+    games: int
+    win_rate: float | None = None
+    adjusted_win_rate: float | None = None
+
+
 class ChampionGraphResponse(BaseModel):
     champion: str
     champion_ddragon: str = ""
     image_url: str = ""
     season: int | None = None
     split: str | None = None
+    role: str | None = None            # selected role (None = all roles merged)
+    roles: list[ChampionRole] = []     # per-role win-rate summary
     games: int = 0
     win_rate: float | None = None          # raw wins / games %
     adjusted_win_rate: float | None = None  # skill-adjusted (50% + avg margin)
