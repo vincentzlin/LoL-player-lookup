@@ -70,13 +70,15 @@ def champion_graph(
     name: str,
     season: int | None = Query(None),
     split: str | None = Query(None),
+    role: str | None = Query(None),
 ):
     with get_session() as session:
         champ = draft.canonical_champion(session, name)
         if champ is None:
             raise HTTPException(status_code=404,
                                 detail=f"'{name}' is not a known LCK champion.")
-        return ChampionGraphResponse(**draft.champion_graph(session, champ, season, split))
+        return ChampionGraphResponse(
+            **draft.champion_graph(session, champ, season, split, role))
 
 
 def _require_player(name: str) -> dict:

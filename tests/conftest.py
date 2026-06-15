@@ -107,11 +107,12 @@ def _draft_stat(gameid, side, team, pos, champ, result, split="Spring"):
     )
 
 
-# Two isolated 2024 'Spring' games for the champion graph model. Each team plays
-# only twice (< MIN_TEAM_GAMES), so every team rating is the average (0) and each
+# Three isolated 2024 'Spring' games for the champion graph model. Each team plays
+# only 3 times (< MIN_TEAM_GAMES), so every team rating is the average (0) and each
 # side's skill-adjusted margin is a clean ±0.5 — making edge signs deterministic.
-# Alpha (Darius/.../Ashe/Lulu) beats Bravo (Teemo/...) both games, so Ashe+Lulu
-# get a positive synergy and Darius gets a favourable counter vs Teemo.
+# Alpha (Darius/.../Ashe/Lulu) beats Bravo (Teemo/...) all 3 games, so every Alpha
+# pair clears the 3-game minimum: Ashe+Lulu get a positive synergy and Darius a
+# favourable counter vs Teemo.
 _ALPHA = [("top", "Darius"), ("jng", "Sejuani"), ("mid", "Orianna"),
           ("bot", "Ashe"), ("sup", "Lulu")]
 _BRAVO = [("top", "Teemo"), ("jng", "Vi"), ("mid", "Syndra"),
@@ -120,12 +121,37 @@ _BRAVO = [("top", "Teemo"), ("jng", "Vi"), ("mid", "Syndra"),
 
 def _draft_rows():
     rows = []
-    for gid in ("d1", "d2"):
+    for gid in ("d1", "d2", "d3"):
         for pos, champ in _ALPHA:
             rows.append(_draft_stat(gid, "Blue", "Alpha", pos, champ, "Win"))
         for pos, champ in _BRAVO:
             rows.append(_draft_stat(gid, "Red", "Bravo", pos, champ, "Loss"))
-    return rows + _strong_team_rows()
+    return rows + _strong_team_rows() + _multi_role_rows()
+
+
+def _multi_role_rows():
+    """A flex champion (Graves) for the role-split tests, in 2024 'Fall'.
+
+    Graves plays JUNGLE on team GJ (3 games, all wins) with teammate Karma in all 3
+    and Nami in only 2; and TOP on team GT (3 games, all losses) with teammate Lux in
+    all 3. Opponents are one-off teams (rating 0). So jng WR is 100 and top WR is 0,
+    the Karma synergy clears the 3-game minimum while Nami (2 games) does not, and Lux
+    only appears for the top role.
+    """
+    rows = []
+    # Jungle: GJ wins all 3. Karma in g1-3; Nami only g1-2.
+    jng_team = [("jng", "Graves"), ("sup", "Karma"), ("bot", "Nami")]
+    for i in ("j1", "j2", "j3"):
+        roster = jng_team if i != "j3" else jng_team[:2]   # drop Nami in j3
+        for pos, champ in roster:
+            rows.append(_draft_stat(i, "Blue", "GJ", pos, champ, "Win", split="Fall"))
+        rows.append(_draft_stat(i, "Red", f"GJO_{i}", "jng", "Galio", "Loss", split="Fall"))
+    # Top: GT loses all 3. Lux in all 3.
+    for i in ("t1", "t2", "t3"):
+        for pos, champ in (("top", "Graves"), ("mid", "Lux")):
+            rows.append(_draft_stat(i, "Blue", "GT", pos, champ, "Loss", split="Fall"))
+        rows.append(_draft_stat(i, "Red", f"GTO_{i}", "top", "Galio", "Win", split="Fall"))
+    return rows
 
 
 def _strong_team_rows():

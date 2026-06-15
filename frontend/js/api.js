@@ -20,10 +20,11 @@ const Api = {
   teams() { return this._get('/api/teams'); },
   roles() { return this._get('/api/roles'); },
   champions() { return this._get('/api/champions'); },
-  championGraph(name, { season, split } = {}) {
+  championGraph(name, { season, split, role } = {}) {
     const p = new URLSearchParams();
     if (season != null) p.set('season', season);
     if (split) p.set('split', split);
+    if (role) p.set('role', role);
     const qs = p.toString();
     return this._get(`/api/champion/${encodeURIComponent(name)}/graph${qs ? '?' + qs : ''}`);
   },

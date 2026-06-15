@@ -1,17 +1,18 @@
 """Tests for the champion draft graph model (VIN-20).
 
-Seeded data (see conftest ``_draft_rows``): two 2024 'Spring' games where team
+Seeded data (see conftest ``_draft_rows``): three 2024 'Spring' games where team
 Alpha (Darius / Sejuani / Orianna / Ashe / Lulu) beats team Bravo (Teemo / Vi /
-Syndra / Jinx / Thresh). Every team has only 2 games (< MIN_TEAM_GAMES), so all
+Syndra / Jinx / Thresh). Every team has only 3 games (< MIN_TEAM_GAMES), so all
 ratings are 0, the expected score is 0.5, and each margin is ±0.5. With K_SHRINK=6
-a pair seen twice on the winning side has weight 0.5*2/(2+6)*100 = 12.5%.
+a pair seen 3× on the winning side has weight 0.5*3/(3+6)*100 = 16.7%.
 
 The endpoints query season 14 (= 2024) Spring to isolate this data.
 """
 from backend.api import draft
 
 TF = {"season": 14, "split": "Spring"}
-EXPECTED_W = 12.5     # 0.5 * 2 / (2 + draft.K_SHRINK) * 100
+FALL = {"season": 14, "split": "Fall"}
+EXPECTED_W = 16.7     # round(0.5 * 3 / (3 + draft.K_SHRINK) * 100, 1)
 
 
 # ── Pure skill-adjustment math ────────────────────────────────────────────────
@@ -60,7 +61,7 @@ def test_synergy_is_positive_for_winning_teammates(client):
     syn = {e["champion"]: e for e in d["synergies"]}
     assert "Lulu" in syn
     assert syn["Lulu"]["weight"] == EXPECTED_W
-    assert syn["Lulu"]["games"] == 2
+    assert syn["Lulu"]["games"] == 3
 
 
 def test_synergy_excludes_opponents(client):
@@ -88,7 +89,7 @@ def test_counter_is_antisymmetric(client):
 def test_losing_side_has_negative_edges(client):
     d = client.get("/api/champion/Teemo/graph", params=TF).json()
     syn = {e["champion"]: e["weight"] for e in d["synergies"]}
-    assert syn["Vi"] == -EXPECTED_W                    # lost together both games
+    assert syn["Vi"] == -EXPECTED_W                    # lost together all 3 games
 
 
 def test_synergies_include_worst_teammates(client):
@@ -101,9 +102,9 @@ def test_synergies_include_worst_teammates(client):
 # ── Win rates ─────────────────────────────────────────────────────────────────
 
 def test_win_rate_and_adjusted_for_neutral_strength(client):
-    """All teams here have 2 games (rating 0, expected 0.5) → adjusted == raw."""
+    """All teams here have 3 games (rating 0, expected 0.5) → adjusted == raw."""
     ashe = client.get("/api/champion/Ashe/graph", params=TF).json()
-    assert ashe["games"] == 2
+    assert ashe["games"] == 3
     assert ashe["win_rate"] == 100.0 and ashe["adjusted_win_rate"] == 100.0
     jinx = client.get("/api/champion/Jinx/graph", params=TF).json()
     assert jinx["win_rate"] == 0.0 and jinx["adjusted_win_rate"] == 0.0
@@ -116,3 +117,48 @@ def test_adjusted_win_rate_recenters_for_a_strong_team(client):
     assert d["win_rate"] == 80.0
     assert d["adjusted_win_rate"] == 50.0
     assert d["adjusted_win_rate"] < d["win_rate"]
+
+
+# ── Role split (Graves: jng on a winning team, top on a losing one) ────────────
+
+def test_roles_summary_separates_win_rates(client):
+    d = client.get("/api/champion/Graves/graph", params=FALL).json()  # all roles
+    roles = {r["role"]: r for r in d["roles"]}
+    assert set(roles) == {"jng", "top"}
+    assert roles["jng"]["win_rate"] == 100.0 and roles["jng"]["games"] == 3
+    assert roles["top"]["win_rate"] == 0.0 and roles["top"]["games"] == 3
+    assert roles["jng"]["role_label"] == "Jungle"
+    # all-roles view merges both
+    assert d["role"] is None and d["games"] == 6 and d["win_rate"] == 50.0
+
+
+def test_synergies_filtered_by_selected_role(client):
+    jng = client.get("/api/champion/Graves/graph",
+                     params={**FALL, "role": "jng"}).json()
+    names = {e["champion"] for e in jng["synergies"]}
+    assert "Karma" in names          # jng teammate, 3 games
+    assert "Lux" not in names        # only a teammate in the top role
+    assert "Nami" not in names       # jng teammate but only 2 games (< min 3)
+    assert jng["role"] == "jng" and jng["win_rate"] == 100.0
+
+    top = client.get("/api/champion/Graves/graph",
+                     params={**FALL, "role": "top"}).json()
+    tsyn = {e["champion"]: e["weight"] for e in top["synergies"]}
+    assert "Lux" in tsyn and tsyn["Lux"] < 0
+    assert "Karma" not in tsyn
+    assert top["win_rate"] == 0.0
+
+
+def test_synergy_requires_min_three_games(client):
+    """Nami (2 games with Graves) is excluded even in the merged all-roles view."""
+    d = client.get("/api/champion/Graves/graph", params=FALL).json()
+    names = {e["champion"] for e in d["synergies"]}
+    assert "Karma" in names
+    assert "Nami" not in names
+
+
+def test_counters_filtered_by_role(client):
+    jng = client.get("/api/champion/Graves/graph",
+                     params={**FALL, "role": "jng"}).json()
+    cnt = {e["champion"]: e for e in jng["counters"]}
+    assert cnt["Galio"]["weight"] > 0 and cnt["Galio"]["games"] == 3
