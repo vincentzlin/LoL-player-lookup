@@ -29,7 +29,7 @@ USECOLS = [
     "kills", "deaths", "assists", "teamkills", "gamelength", "totalgold",
     "total cs", "towers", "dragons", "barons",
     "cspm", "dpm", "damageshare", "earnedgoldshare",
-    "golddiffat15", "csdiffat15", "result",
+    "golddiffat15", "golddiffat25", "csdiffat15", "result",
 ]
 
 
@@ -148,6 +148,7 @@ def load(paths: list[Path]) -> None:
                     damageshare=_to_float(d.get("damageshare")),
                     earnedgoldshare=_to_float(d.get("earnedgoldshare")),
                     golddiffat15=_to_float(d.get("golddiffat15")),
+                    golddiffat25=_to_float(d.get("golddiffat25")),
                     csdiffat15=_to_float(d.get("csdiffat15")),
                     result=_to_result(d.get("result")),
                     datacompleteness=(str(d.get("datacompleteness")) if not pd.isna(d.get("datacompleteness")) else None),

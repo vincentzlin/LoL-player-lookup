@@ -345,6 +345,32 @@ function statChip(label, value, { pct = false, vs50 = false } = {}) {
     `<span class="champ-stat-val${cls}">${txt}</span></div>`;
 }
 
+// Signed gold, e.g. "+320" / "−150" / "—".
+function goldSigned(v) {
+  if (v == null) return '—';
+  const n = Math.round(v);
+  return (n > 0 ? '+' : '') + n;
+}
+
+// Throwing-factor chips. Factor: positive = loses leads (red), negative = grows (green).
+function throwingBlock(s) {
+  if (!s.swing_games) {
+    return '<div class="no-data">No games reaching 25 minutes in this timeframe.</div>';
+  }
+  const tf = s.throwing_factor;
+  const tfCls = tf == null ? '' : (tf > 0 ? ' delta-neg' : (tf < 0 ? ' delta-pos' : ''));
+  const swCls = s.avg_swing == null ? '' : (s.avg_swing > 0 ? ' delta-pos' : (s.avg_swing < 0 ? ' delta-neg' : ''));
+  const chip = (label, valHtml) =>
+    `<div class="champ-stat"><span class="champ-stat-label">${label}</span>${valHtml}</div>`;
+  return (
+    chip('Throwing factor', `<span class="champ-stat-val${tfCls}">${goldSigned(tf)}</span>`) +
+    chip('Avg swing 15→25', `<span class="champ-stat-val${swCls}">${goldSigned(s.avg_swing)} g</span>`) +
+    chip('Throws', `<span class="champ-stat-val">${s.throw_count}${s.throw_rate == null ? '' : ` · ${s.throw_rate}%`}</span>`) +
+    chip('Avg throw size', `<span class="champ-stat-val">${s.avg_throw_size == null ? '—' : Math.round(s.avg_throw_size) + ' g'}</span>`) +
+    chip('Sample', `<span class="champ-stat-val">${s.swing_games} g ≥25m</span>`)
+  );
+}
+
 // Small 3-column table (label | win rate | adjusted WR) for the split sections.
 function splitTable(firstHead, rows) {
   if (!rows.length) return '<div class="no-data">No games in this timeframe.</div>';
@@ -391,6 +417,7 @@ function renderChampionGraph(d) {
     (s.duration_splits || []).map((x) => ({ label: `> ${x.min_minutes} min`, ...x })));
   $('champ-dragons').innerHTML = splitTable('Dragons',
     (s.dragon_splits || []).map((x) => ({ label: x.bucket, ...x })));
+  $('champ-throwing').innerHTML = throwingBlock(s);
 
   // Selecting a new champion/role closes any open pairing detail.
   $('champ-pairing').classList.add('hidden');
@@ -433,10 +460,11 @@ function renderPairing(d) {
     const x = (st.duration_splits || []).find((q) => q.min_minutes === m);
     return x ? x.win_rate : null;
   };
-  const delta = (a, b, suffix = '%') => {
+  const delta = (a, b, suffix = '%', invert = false) => {
     if (a == null || b == null) return '<td class="delta delta-flat">—</td>';
     const diff = a - b;
-    const cls = Math.abs(diff) < 1e-9 ? 'delta-flat' : (diff > 0 ? 'delta-pos' : 'delta-neg');
+    const good = invert ? diff < 0 : diff > 0;       // invert: lower is better
+    const cls = Math.abs(diff) < 1e-9 ? 'delta-flat' : (good ? 'delta-pos' : 'delta-neg');
     const sign = diff > 0 ? '+' : '';
     return `<td class="delta ${cls}">${sign}${diff.toFixed(1)}${suffix}</td>`;
   };
@@ -445,16 +473,19 @@ function renderPairing(d) {
     ['Win rate', sub.win_rate, all.win_rate, 'pct'],
     ['Adjusted WR', sub.adjusted_win_rate, all.adjusted_win_rate, 'pct'],
     ['Gold diff @15', sub.gd15, all.gd15, 'gold'],
+    ['Throwing factor', sub.throwing_factor, all.throwing_factor, 'gold', true],
+    ['Avg swing 15→25', sub.avg_swing, all.avg_swing, 'gold'],
+    ['Throw rate', sub.throw_rate, all.throw_rate, 'pct', true],
     ['Win rate > 25 min', durWR(sub, 25), durWR(all, 25), 'pct'],
     ['Win rate > 30 min', durWR(sub, 30), durWR(all, 30), 'pct'],
     ['Win rate > 35 min', durWR(sub, 35), durWR(all, 35), 'pct'],
   ];
   let html = `<table class="cmp"><thead><tr><th>Metric</th>` +
     `<th class="col-player">${verb} ${d.other.champion}</th><th>Overall</th><th>Δ</th></tr></thead><tbody>`;
-  rows.forEach(([label, a, b, type]) => {
+  rows.forEach(([label, a, b, type, invert]) => {
     const fmt = type === 'pct' ? pct : (type === 'gold' ? num : (v) => (v == null ? '—' : v));
-    const dCell = type === 'pct' ? delta(a, b, '%')
-      : type === 'gold' ? delta(a, b, '') : '<td class="delta delta-flat">—</td>';
+    const dCell = type === 'pct' ? delta(a, b, '%', invert)
+      : type === 'gold' ? delta(a, b, '', invert) : '<td class="delta delta-flat">—</td>';
     html += `<tr><td>${label}</td><td class="val-strong col-player">${fmt(a)}</td>` +
       `<td>${fmt(b)}</td>${dCell}</tr>`;
   });

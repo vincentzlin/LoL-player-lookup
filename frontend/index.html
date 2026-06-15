@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>LCK Pro Player Stats</title>
-  <link rel="stylesheet" href="/static/css/style.css?v=12" />
+  <link rel="stylesheet" href="/static/css/style.css?v=13" />
 </head>
 <body>
   <header class="header">
@@ -125,6 +125,11 @@
         <div id="champ-dragons" class="cmp-wrap"></div>
       </div>
 
+      <div class="detail-section wide">
+        <h3>Throwing factor <span class="hint">— gold-lead swing from 15 → 25 min (lower is better)</span></h3>
+        <div id="champ-throwing" class="champ-stats"></div>
+      </div>
+
       <!-- Pairing detail (recomputed for games with the clicked champion) -->
       <div id="champ-pairing" class="detail-section wide hidden">
         <h3 id="champ-pairing-title"></h3>
@@ -148,7 +153,7 @@
     <div id="loading-msg">Loading…</div>
   </div>
 
-  <script src="/static/js/api.js?v=12"></script>
-  <script src="/static/js/app.js?v=12"></script>
+  <script src="/static/js/api.js?v=13"></script>
+  <script src="/static/js/app.js?v=13"></script>
 </body>
 </html>

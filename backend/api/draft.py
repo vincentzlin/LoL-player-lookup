@@ -42,6 +42,7 @@ class GameRec(NamedTuple):
     dur_s: int | None              # game length in seconds
     dragons: int | None            # focal team's dragon total
     gd15: float | None             # focal champion's gold diff @15 (nullable)
+    gd25: float | None             # focal champion's gold diff @25 (null <25min)
     teammates: frozenset           # other champions on the focal side
     opponents: frozenset           # champions on the opposing side
 
@@ -147,8 +148,8 @@ def _build(session: Session, season, split) -> dict:
                     continue
                 records[(r.champion, r.position)].append(GameRec(
                     margin=margin, won=won, dur_s=r.gamelength_s, dragons=r.dragons,
-                    gd15=r.golddiffat15, teammates=champs - {r.champion},
-                    opponents=opponents))
+                    gd15=r.golddiffat15, gd25=r.golddiffat25,
+                    teammates=champs - {r.champion}, opponents=opponents))
 
     return {"records": records, "meta": meta}
 
@@ -223,6 +224,29 @@ def _split(recs: list[GameRec]) -> dict:
     return {"games": games, "win_rate": win_rate, "adjusted_win_rate": adjusted}
 
 
+def _throwing(recs: list[GameRec]) -> dict:
+    """Lead-swing metrics: how the gold diff moves from 15 → 25 minutes.
+
+    swing = GD@25 − GD@15. ``throwing_factor`` = −mean(swing) (high = loses leads).
+    A 'throw' is a game the champion led at 15 (GD@15 > 0) yet the lead shrank by 25.
+    Only games that reached 25 min (both diffs present) are counted.
+    """
+    swings = [(r.gd15, r.gd25) for r in recs if r.gd15 is not None and r.gd25 is not None]
+    if not swings:
+        return {"swing_games": 0, "avg_swing": None, "throwing_factor": None,
+                "throw_count": 0, "throw_rate": None, "avg_throw_size": None}
+    avg_swing = sum(g25 - g15 for g15, g25 in swings) / len(swings)
+    throws = [g15 - g25 for g15, g25 in swings if g15 > 0 and g25 < g15]
+    return {
+        "swing_games": len(swings),
+        "avg_swing": round(avg_swing, 1),
+        "throwing_factor": round(-avg_swing, 1),
+        "throw_count": len(throws),
+        "throw_rate": round(len(throws) / len(swings) * 100, 1),
+        "avg_throw_size": round(sum(throws) / len(throws), 1) if throws else None,
+    }
+
+
 def _aggregate(recs: list[GameRec]) -> dict:
     """Full champion stat block (overall + duration/dragon splits + GD@15)."""
     gd = [r.gd15 for r in recs if r.gd15 is not None]
@@ -241,7 +265,7 @@ def _aggregate(recs: list[GameRec]) -> dict:
     dragons = [{"bucket": b, **_split(by_bucket[b])}
                for b in _DRAGON_ORDER if b in by_bucket]
 
-    return {**_split(recs), "gd15": gd15,
+    return {**_split(recs), "gd15": gd15, **_throwing(recs),
             "duration_splits": duration, "dragon_splits": dragons}
 
 
