@@ -162,6 +162,36 @@ class ChampionRole(BaseModel):
     adjusted_win_rate: float | None = None
 
 
+class DurationSplit(BaseModel):
+    min_minutes: int                   # games longer than this many minutes
+    games: int
+    win_rate: float | None = None
+    adjusted_win_rate: float | None = None
+
+
+class DragonSplit(BaseModel):
+    bucket: str                        # "0" / "1" / "2" / "3" / "4+"
+    games: int
+    win_rate: float | None = None
+    adjusted_win_rate: float | None = None
+
+
+class ChampionStats(BaseModel):
+    games: int = 0
+    win_rate: float | None = None          # raw wins / games %
+    adjusted_win_rate: float | None = None  # skill-adjusted (50% + avg margin)
+    gd15: float | None = None              # avg gold diff @15
+    # Throwing factor (GD@15 → GD@25 lead swing). Only games reaching 25 min count.
+    swing_games: int = 0                   # games with @25 data
+    avg_swing: float | None = None         # mean(GD@25 − GD@15) in gold
+    throwing_factor: float | None = None   # −avg_swing (high = loses leads)
+    throw_count: int = 0                   # games led at 15 but lead shrank by 25
+    throw_rate: float | None = None        # throw_count / swing_games %
+    avg_throw_size: float | None = None    # avg gold surrendered in throw games
+    duration_splits: list[DurationSplit] = []
+    dragon_splits: list[DragonSplit] = []
+
+
 class ChampionGraphResponse(BaseModel):
     champion: str
     champion_ddragon: str = ""
@@ -170,11 +200,22 @@ class ChampionGraphResponse(BaseModel):
     split: str | None = None
     role: str | None = None            # selected role (None = all roles merged)
     roles: list[ChampionRole] = []     # per-role win-rate summary
-    games: int = 0
-    win_rate: float | None = None          # raw wins / games %
-    adjusted_win_rate: float | None = None  # skill-adjusted (50% + avg margin)
+    stats: ChampionStats = ChampionStats()
     synergies: list[GraphEdge] = []    # best (+) → worst (−) teammates
     counters: list[GraphEdge] = []     # favourable (+) → unfavourable (−)
+
+
+class ChampionPairingResponse(BaseModel):
+    champion: str
+    champion_ddragon: str = ""
+    image_url: str = ""
+    other: ChampionInfo
+    kind: str                          # "synergy" / "counter"
+    season: int | None = None
+    split: str | None = None
+    role: str | None = None
+    stats: ChampionStats = ChampionStats()     # recomputed over co-occurring games
+    overall: ChampionStats = ChampionStats()   # champion's overall, for comparison
 
 
 class StatsResponse(BaseModel):

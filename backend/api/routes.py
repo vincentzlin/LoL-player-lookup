@@ -7,7 +7,7 @@ from backend.api import stats, draft
 from backend.api.schemas import (
     PlayerInfo, FiltersResponse, StatsResponse, Metrics, ChampionMetrics, Streak,
     MatchSummary, MatchDetail, TeamInfo, RoleInfo, TeamGroupResponse, RoleGroupResponse,
-    ChampionInfo, ChampionGraphResponse,
+    ChampionInfo, ChampionGraphResponse, ChampionPairingResponse,
 )
 
 router = APIRouter(prefix="/api")
@@ -79,6 +79,28 @@ def champion_graph(
                                 detail=f"'{name}' is not a known LCK champion.")
         return ChampionGraphResponse(
             **draft.champion_graph(session, champ, season, split, role))
+
+
+@router.get("/champion/{name}/pairing", response_model=ChampionPairingResponse)
+def champion_pairing(
+    name: str,
+    other: str = Query(...),
+    kind: str = Query(...),
+    season: int | None = Query(None),
+    split: str | None = Query(None),
+    role: str | None = Query(None),
+):
+    if kind not in ("synergy", "counter"):
+        raise HTTPException(status_code=400, detail="kind must be 'synergy' or 'counter'.")
+    with get_session() as session:
+        champ = draft.canonical_champion(session, name)
+        other_champ = draft.canonical_champion(session, other)
+        if champ is None or other_champ is None:
+            missing = name if champ is None else other
+            raise HTTPException(status_code=404,
+                                detail=f"'{missing}' is not a known LCK champion.")
+        return ChampionPairingResponse(**draft.champion_pairing(
+            session, champ, other_champ, kind, season, split, role))
 
 
 def _require_player(name: str) -> dict:

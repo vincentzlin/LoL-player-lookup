@@ -315,20 +315,25 @@ async function loadChampionGraph(switchView) {
 }
 
 // One ranked edge row: champion portrait, name, signed win-margin %, sample size.
-function edgeRow(e) {
+function edgeRow(e, kind) {
   const cls = e.weight > 0 ? 'delta-pos' : (e.weight < 0 ? 'delta-neg' : 'delta-flat');
   const sign = e.weight > 0 ? '+' : '';
-  return `<div class="edge-row">` +
+  return `<button type="button" class="edge-row" data-other="${e.champion}" data-kind="${kind}">` +
     `<img src="${e.image_url}" alt="${e.champion}" onerror="this.style.visibility='hidden'" />` +
     `<span class="edge-name">${e.champion}</span>` +
     `<span class="edge-weight ${cls}">${sign}${e.weight.toFixed(1)}%</span>` +
     `<span class="edge-games">${e.games} game${e.games === 1 ? '' : 's'}</span>` +
-  `</div>`;
+  `</button>`;
 }
 
-function edgeList(edges, emptyMsg) {
-  if (!edges || !edges.length) return `<div class="no-data">${emptyMsg}</div>`;
-  return `<div class="edge-list">${edges.map(edgeRow).join('')}</div>`;
+// Render an edge list into `containerId`, wiring each row to open its pairing detail.
+function renderEdges(containerId, edges, emptyMsg, kind) {
+  const el = $(containerId);
+  if (!edges || !edges.length) { el.innerHTML = `<div class="no-data">${emptyMsg}</div>`; return; }
+  el.innerHTML = `<div class="edge-list">${edges.map((e) => edgeRow(e, kind)).join('')}</div>`;
+  el.querySelectorAll('.edge-row').forEach((b) => {
+    b.onclick = () => openPairing(b.dataset.other, b.dataset.kind);
+  });
 }
 
 // One hero stat: label + value, optionally coloured vs a 50% midpoint.
@@ -338,6 +343,45 @@ function statChip(label, value, { pct = false, vs50 = false } = {}) {
   if (vs50 && value != null) cls = value > 50 ? ' delta-pos' : (value < 50 ? ' delta-neg' : '');
   return `<div class="champ-stat"><span class="champ-stat-label">${label}</span>` +
     `<span class="champ-stat-val${cls}">${txt}</span></div>`;
+}
+
+// Signed gold, e.g. "+320" / "−150" / "—".
+function goldSigned(v) {
+  if (v == null) return '—';
+  const n = Math.round(v);
+  return (n > 0 ? '+' : '') + n;
+}
+
+// Throwing-factor chips. Factor: positive = loses leads (red), negative = grows (green).
+function throwingBlock(s) {
+  if (!s.swing_games) {
+    return '<div class="no-data">No games reaching 25 minutes in this timeframe.</div>';
+  }
+  const tf = s.throwing_factor;
+  const tfCls = tf == null ? '' : (tf > 0 ? ' delta-neg' : (tf < 0 ? ' delta-pos' : ''));
+  const swCls = s.avg_swing == null ? '' : (s.avg_swing > 0 ? ' delta-pos' : (s.avg_swing < 0 ? ' delta-neg' : ''));
+  const chip = (label, valHtml) =>
+    `<div class="champ-stat"><span class="champ-stat-label">${label}</span>${valHtml}</div>`;
+  return (
+    chip('Throwing factor', `<span class="champ-stat-val${tfCls}">${goldSigned(tf)}</span>`) +
+    chip('Avg swing 15→25', `<span class="champ-stat-val${swCls}">${goldSigned(s.avg_swing)} g</span>`) +
+    chip('Throws', `<span class="champ-stat-val">${s.throw_count}${s.throw_rate == null ? '' : ` · ${s.throw_rate}%`}</span>`) +
+    chip('Avg throw size', `<span class="champ-stat-val">${s.avg_throw_size == null ? '—' : Math.round(s.avg_throw_size) + ' g'}</span>`) +
+    chip('Sample', `<span class="champ-stat-val">${s.swing_games} g ≥25m</span>`)
+  );
+}
+
+// Small 3-column table (label | win rate | adjusted WR) for the split sections.
+function splitTable(firstHead, rows) {
+  if (!rows.length) return '<div class="no-data">No games in this timeframe.</div>';
+  let html = `<table class="cmp"><thead><tr><th>${firstHead}</th><th>Games</th>` +
+    `<th>Win rate</th><th>Adjusted WR</th></tr></thead><tbody>`;
+  rows.forEach((r) => {
+    const pct = (v) => (v == null ? '—' : `${v.toFixed(1)}%`);
+    html += `<tr><td>${r.label}</td><td>${r.games}</td>` +
+      `<td class="val-strong">${pct(r.win_rate)}</td><td>${pct(r.adjusted_win_rate)}</td></tr>`;
+  });
+  return html + '</tbody></table>';
 }
 
 function renderChampRoleRow(d) {
@@ -356,20 +400,96 @@ function renderChampRoleRow(d) {
 
 function renderChampionGraph(d) {
   const tf = champState.tf;
+  const s = d.stats || {};
   $('champ-hero-img').src = d.image_url || '';
   $('champ-hero-name').textContent = d.champion;
   const seasonTxt = tf && tf.season != null ? `Season ${tf.season}` : 'All seasons';
   const splitTxt = tf && tf.split ? ` · ${tf.split}` : '';
   $('champ-hero-sub').textContent = `LCK draft graph · ${seasonTxt}${splitTxt}`;
   $('champ-hero-stats').innerHTML =
-    statChip('Games', d.games) +
-    statChip('Win rate', d.win_rate, { pct: true, vs50: true }) +
-    statChip('Adjusted WR', d.adjusted_win_rate, { pct: true, vs50: true });
+    statChip('Games', s.games) +
+    statChip('Win rate', s.win_rate, { pct: true, vs50: true }) +
+    statChip('Adjusted WR', s.adjusted_win_rate, { pct: true, vs50: true }) +
+    statChip('Gold diff @15', s.gd15 == null ? null : Math.round(s.gd15));
   renderChampRoleRow(d);
-  $('champ-synergies').innerHTML =
-    edgeList(d.synergies, 'No teammates with 3+ games together in this timeframe.');
-  $('champ-counters').innerHTML =
-    edgeList(d.counters, 'No matchups with 3+ games in this timeframe.');
+
+  $('champ-duration').innerHTML = splitTable('Game length',
+    (s.duration_splits || []).map((x) => ({ label: `> ${x.min_minutes} min`, ...x })));
+  $('champ-dragons').innerHTML = splitTable('Dragons',
+    (s.dragon_splits || []).map((x) => ({ label: x.bucket, ...x })));
+  $('champ-throwing').innerHTML = throwingBlock(s);
+
+  // Selecting a new champion/role closes any open pairing detail.
+  $('champ-pairing').classList.add('hidden');
+  renderEdges('champ-synergies', d.synergies,
+    'No teammates with 3+ games together in this timeframe.', 'synergy');
+  renderEdges('champ-counters', d.counters,
+    'No matchups with 3+ games in this timeframe.', 'counter');
+}
+
+// ── Pairing detail (recomputed over games where the other champion appears) ────
+async function openPairing(other, kind) {
+  showLoading('Loading pairing…');
+  try {
+    const d = await Api.championPairing(champState.name,
+      { other, kind, ...champState.tf, role: champState.role });
+    renderPairing(d);
+    $('champ-pairing').classList.remove('hidden');
+    $('champ-pairing').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } catch (e) {
+    const err = $('search-error');
+    err.textContent = isServerDown(e) ? SERVER_DOWN_MSG : `Couldn't load that pairing.`;
+    err.classList.remove('hidden');
+  } finally {
+    hideLoading();
+  }
+}
+
+function renderPairing(d) {
+  const verb = d.kind === 'synergy' ? 'with' : 'vs';
+  $('champ-pairing-title').innerHTML =
+    `${d.champion} ${verb} ${d.other.champion} ` +
+    `<span class="hint">— recomputed for shared games vs overall</span> ` +
+    `<button type="button" class="graph-link" id="champ-pairing-close">Close ✕</button>`;
+  $('champ-pairing-close').onclick = () => $('champ-pairing').classList.add('hidden');
+
+  const sub = d.stats || {}, all = d.overall || {};
+  const pct = (v) => (v == null ? '—' : `${v.toFixed(1)}%`);
+  const num = (v) => (v == null ? '—' : Math.round(v));
+  const durWR = (st, m) => {
+    const x = (st.duration_splits || []).find((q) => q.min_minutes === m);
+    return x ? x.win_rate : null;
+  };
+  const delta = (a, b, suffix = '%', invert = false) => {
+    if (a == null || b == null) return '<td class="delta delta-flat">—</td>';
+    const diff = a - b;
+    const good = invert ? diff < 0 : diff > 0;       // invert: lower is better
+    const cls = Math.abs(diff) < 1e-9 ? 'delta-flat' : (good ? 'delta-pos' : 'delta-neg');
+    const sign = diff > 0 ? '+' : '';
+    return `<td class="delta ${cls}">${sign}${diff.toFixed(1)}${suffix}</td>`;
+  };
+  const rows = [
+    ['Games', sub.games, all.games, ''],
+    ['Win rate', sub.win_rate, all.win_rate, 'pct'],
+    ['Adjusted WR', sub.adjusted_win_rate, all.adjusted_win_rate, 'pct'],
+    ['Gold diff @15', sub.gd15, all.gd15, 'gold'],
+    ['Throwing factor', sub.throwing_factor, all.throwing_factor, 'gold', true],
+    ['Avg swing 15→25', sub.avg_swing, all.avg_swing, 'gold'],
+    ['Throw rate', sub.throw_rate, all.throw_rate, 'pct', true],
+    ['Win rate > 25 min', durWR(sub, 25), durWR(all, 25), 'pct'],
+    ['Win rate > 30 min', durWR(sub, 30), durWR(all, 30), 'pct'],
+    ['Win rate > 35 min', durWR(sub, 35), durWR(all, 35), 'pct'],
+  ];
+  let html = `<table class="cmp"><thead><tr><th>Metric</th>` +
+    `<th class="col-player">${verb} ${d.other.champion}</th><th>Overall</th><th>Δ</th></tr></thead><tbody>`;
+  rows.forEach(([label, a, b, type, invert]) => {
+    const fmt = type === 'pct' ? pct : (type === 'gold' ? num : (v) => (v == null ? '—' : v));
+    const dCell = type === 'pct' ? delta(a, b, '%', invert)
+      : type === 'gold' ? delta(a, b, '', invert) : '<td class="delta delta-flat">—</td>';
+    html += `<tr><td>${label}</td><td class="val-strong col-player">${fmt(a)}</td>` +
+      `<td>${fmt(b)}</td>${dCell}</tr>`;
+  });
+  $('champ-pairing-table').innerHTML = html + '</tbody></table>';
 }
 
 function champBack() {

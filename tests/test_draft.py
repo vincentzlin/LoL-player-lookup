@@ -103,20 +103,81 @@ def test_synergies_include_worst_teammates(client):
 
 def test_win_rate_and_adjusted_for_neutral_strength(client):
     """All teams here have 3 games (rating 0, expected 0.5) → adjusted == raw."""
-    ashe = client.get("/api/champion/Ashe/graph", params=TF).json()
+    ashe = client.get("/api/champion/Ashe/graph", params=TF).json()["stats"]
     assert ashe["games"] == 3
     assert ashe["win_rate"] == 100.0 and ashe["adjusted_win_rate"] == 100.0
-    jinx = client.get("/api/champion/Jinx/graph", params=TF).json()
+    jinx = client.get("/api/champion/Jinx/graph", params=TF).json()["stats"]
     assert jinx["win_rate"] == 0.0 and jinx["adjusted_win_rate"] == 0.0
 
 
 def test_adjusted_win_rate_recenters_for_a_strong_team(client):
     """Riven rides a strong team (80% raw) but only meets expectations → adj 50%."""
-    d = client.get("/api/champion/Riven/graph",
-                   params={"season": 14, "split": "Summer"}).json()
-    assert d["win_rate"] == 80.0
-    assert d["adjusted_win_rate"] == 50.0
-    assert d["adjusted_win_rate"] < d["win_rate"]
+    s = client.get("/api/champion/Riven/graph",
+                   params={"season": 14, "split": "Summer"}).json()["stats"]
+    assert s["win_rate"] == 80.0
+    assert s["adjusted_win_rate"] == 50.0
+    assert s["adjusted_win_rate"] < s["win_rate"]
+
+
+# ── Duration / dragon splits + GD@15 + pairing recompute (Caitlyn fixture) ─────
+
+WINTER = {"season": 14, "split": "Winter"}
+
+
+def test_overall_gd15_and_splits(client):
+    s = client.get("/api/champion/Caitlyn/graph", params=WINTER).json()["stats"]
+    assert s["games"] == 4 and s["win_rate"] == 50.0
+    assert s["gd15"] == 50.0                              # mean(100,300,-200,0)
+    dur = {x["min_minutes"]: x for x in s["duration_splits"]}
+    assert dur[25]["games"] == 3 and dur[30]["games"] == 2 and dur[35]["games"] == 1
+    assert dur[30]["win_rate"] == 0.0                     # both >30min games are losses
+    drag = {x["bucket"]: x for x in s["dragon_splits"]}
+    assert set(drag) == {"0", "1", "2", "4+"}            # no 3-dragon game
+    assert drag["1"]["win_rate"] == 100.0 and drag["4+"]["win_rate"] == 0.0
+
+
+def test_pairing_recomputes_for_synergy(client):
+    d = client.get("/api/champion/Caitlyn/pairing",
+                   params={**WINTER, "other": "Lux", "kind": "synergy"}).json()
+    assert d["other"]["champion"] == "Lux" and d["kind"] == "synergy"
+    assert d["stats"]["games"] == 3                       # Lux co-occurs in g1-3
+    assert d["stats"]["gd15"] == 66.7                     # mean(100,300,-200)
+    assert d["overall"]["gd15"] == 50.0                   # differs from overall
+    assert d["stats"]["win_rate"] == 66.7
+
+
+def test_throwing_factor_metric(client):
+    """swings +300,−300,−400,+50 → avg −87.5, factor +87.5; one throw (c2)."""
+    s = client.get("/api/champion/Caitlyn/graph", params=WINTER).json()["stats"]
+    assert s["swing_games"] == 4
+    assert s["avg_swing"] == -87.5
+    assert s["throwing_factor"] == 87.5
+    assert s["throw_count"] == 1            # only c2: ahead at 15 (+300) then 0
+    assert s["throw_rate"] == 25.0
+    assert s["avg_throw_size"] == 300.0
+
+
+def test_throwing_factor_in_pairing(client):
+    """Lux co-occurs in c1-3: swings +300,−300,−400 → avg −133.3, factor +133.3."""
+    d = client.get("/api/champion/Caitlyn/pairing",
+                   params={**WINTER, "other": "Lux", "kind": "synergy"}).json()
+    assert d["stats"]["swing_games"] == 3
+    assert d["stats"]["throwing_factor"] == 133.3
+    assert d["overall"]["throwing_factor"] == 87.5     # differs from overall
+
+
+def test_pairing_recomputes_for_counter(client):
+    d = client.get("/api/champion/Caitlyn/pairing",
+                   params={**WINTER, "other": "Jinx", "kind": "counter"}).json()
+    assert d["kind"] == "counter" and d["stats"]["games"] == 3
+    assert d["stats"]["gd15"] == 66.7
+
+
+def test_pairing_bad_inputs(client):
+    assert client.get("/api/champion/Caitlyn/pairing",
+                      params={"other": "Lux", "kind": "bogus"}).status_code == 400
+    assert client.get("/api/champion/Caitlyn/pairing",
+                      params={"other": "NotAChamp", "kind": "synergy"}).status_code == 404
 
 
 # ── Role split (Graves: jng on a winning team, top on a losing one) ────────────
@@ -129,7 +190,7 @@ def test_roles_summary_separates_win_rates(client):
     assert roles["top"]["win_rate"] == 0.0 and roles["top"]["games"] == 3
     assert roles["jng"]["role_label"] == "Jungle"
     # all-roles view merges both
-    assert d["role"] is None and d["games"] == 6 and d["win_rate"] == 50.0
+    assert d["role"] is None and d["stats"]["games"] == 6 and d["stats"]["win_rate"] == 50.0
 
 
 def test_synergies_filtered_by_selected_role(client):
@@ -139,14 +200,14 @@ def test_synergies_filtered_by_selected_role(client):
     assert "Karma" in names          # jng teammate, 3 games
     assert "Lux" not in names        # only a teammate in the top role
     assert "Nami" not in names       # jng teammate but only 2 games (< min 3)
-    assert jng["role"] == "jng" and jng["win_rate"] == 100.0
+    assert jng["role"] == "jng" and jng["stats"]["win_rate"] == 100.0
 
     top = client.get("/api/champion/Graves/graph",
                      params={**FALL, "role": "top"}).json()
     tsyn = {e["champion"]: e["weight"] for e in top["synergies"]}
     assert "Lux" in tsyn and tsyn["Lux"] < 0
     assert "Karma" not in tsyn
-    assert top["win_rate"] == 0.0
+    assert top["stats"]["win_rate"] == 0.0
 
 
 def test_synergy_requires_min_three_games(client):

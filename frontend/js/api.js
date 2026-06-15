@@ -28,6 +28,15 @@ const Api = {
     const qs = p.toString();
     return this._get(`/api/champion/${encodeURIComponent(name)}/graph${qs ? '?' + qs : ''}`);
   },
+  championPairing(name, { other, kind, season, split, role } = {}) {
+    const p = new URLSearchParams();
+    p.set('other', other);
+    p.set('kind', kind);
+    if (season != null) p.set('season', season);
+    if (split) p.set('split', split);
+    if (role) p.set('role', role);
+    return this._get(`/api/champion/${encodeURIComponent(name)}/pairing?${p.toString()}`);
+  },
   teamGroup(team) { return this._get(`/api/team/${encodeURIComponent(team)}`); },
   roleGroup(role) { return this._get(`/api/role/${encodeURIComponent(role)}`); },
   match(gameid) { return this._get(`/api/match/${encodeURIComponent(gameid)}`); },
