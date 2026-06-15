@@ -303,10 +303,13 @@ table.cmp tr:hover td { background: rgba(255,255,255,.02); }
   gap: 8px;
 }
 .edge-row {
-  display: flex; align-items: center; gap: 10px;
+  display: flex; align-items: center; gap: 10px; width: 100%;
   background: var(--bg3); border: 1px solid var(--border);
   border-radius: var(--radius); padding: 8px 12px;
+  font: inherit; color: inherit; text-align: left; cursor: pointer;
+  transition: border-color .15s, transform .1s;
 }
+.edge-row:hover { border-color: var(--accent); transform: translateY(-1px); }
 .edge-row img {
   width: 34px; height: 34px; border-radius: 6px; background: var(--bg); object-fit: cover;
 }

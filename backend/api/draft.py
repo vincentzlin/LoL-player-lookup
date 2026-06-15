@@ -16,6 +16,7 @@ data is small, so a single pass is cheap and the cache avoids recomputing per re
 """
 import math
 from collections import defaultdict
+from typing import NamedTuple
 
 from sqlalchemy.orm import Session
 
@@ -29,8 +30,20 @@ MIN_TEAM_GAMES = 5      # below this a team gets the average rating (0)
 MIN_EDGE_GAMES = 3      # a synergy/counter edge needs this many shared games to show
 P_CLAMP = (0.05, 0.95)  # clamp win rate before the logit, to avoid infinities
 TOP_N = 8               # default ranking length per category
+DURATION_MINUTES = [25, 30, 35]   # cumulative ">N min" win-rate splits
 
 _ROLES = ["top", "jng", "mid", "bot", "sup"]
+
+
+class GameRec(NamedTuple):
+    """One game from a focal champion's perspective (in a given role)."""
+    margin: float                  # skill-adjusted actual − expected (focal side)
+    won: bool
+    dur_s: int | None              # game length in seconds
+    dragons: int | None            # focal team's dragon total
+    gd15: float | None             # focal champion's gold diff @15 (nullable)
+    teammates: frozenset           # other champions on the focal side
+    opponents: frozenset           # champions on the opposing side
 
 # (id(engine), season, split) -> built edge dict
 _edge_cache: dict = {}
@@ -100,11 +113,9 @@ def _build(session: Session, season, split) -> dict:
     by_game = _group_games(rows)
     ratings = _team_ratings(by_game)
 
-    # Everything is keyed by the FOCAL champion's role so the champion view can
-    # filter by the role that champion was played in.
-    role_games: dict = defaultdict(lambda: [0, 0, 0.0])           # (champ, role) -> [games, wins, Σmargin]
-    syn: dict = defaultdict(lambda: defaultdict(lambda: [0.0, 0]))  # (champ, role) -> teammate -> [Σmargin, n]
-    cnt: dict = defaultdict(lambda: defaultdict(lambda: [0.0, 0]))  # (champ, role) -> opponent -> [Σmargin, n]
+    # One GameRec per (focal champion, role) appearance, so the champion view can
+    # filter by role and recompute any stat over an arbitrary subset of games.
+    records: dict = defaultdict(list)   # (champ, role) -> [GameRec, ...]
     meta: dict[str, dict] = {}
 
     for r in rows:
@@ -127,28 +138,19 @@ def _build(session: Session, season, split) -> dict:
             ratings.get(ta, 0.0), ratings.get(tb, 0.0))
         won_a = res_a == "Win"
 
-        # (champion, role) pairs per side; champions are distinct within a side.
-        side_a = {r.champion: r.position for r in rows_a if r.champion and r.position}
-        side_b = {r.champion: r.position for r in rows_b if r.champion and r.position}
+        for mine, theirs, margin, won in ((rows_a, rows_b, margin_a, won_a),
+                                          (rows_b, rows_a, -margin_a, not won_a)):
+            champs = frozenset(r.champion for r in mine if r.champion)
+            opponents = frozenset(r.champion for r in theirs if r.champion)
+            for r in mine:
+                if not r.champion or not r.position:
+                    continue
+                records[(r.champion, r.position)].append(GameRec(
+                    margin=margin, won=won, dur_s=r.gamelength_s, dragons=r.dragons,
+                    gd15=r.golddiffat15, teammates=champs - {r.champion},
+                    opponents=opponents))
 
-        for mine, theirs, margin, won in ((side_a, side_b, margin_a, won_a),
-                                          (side_b, side_a, -margin_a, not won_a)):
-            champs = set(mine)
-            for champ, role in mine.items():
-                rec = role_games[(champ, role)]
-                rec[0] += 1
-                rec[1] += 1 if won else 0
-                rec[2] += margin
-                for teammate in champs - {champ}:
-                    e = syn[(champ, role)][teammate]
-                    e[0] += margin
-                    e[1] += 1
-                for opponent in theirs:
-                    e = cnt[(champ, role)][opponent]
-                    e[0] += margin
-                    e[1] += 1
-
-    return {"role_games": role_games, "syn": syn, "cnt": cnt, "meta": meta}
+    return {"records": records, "meta": meta}
 
 
 def build_edges(session: Session, season=None, split=None) -> dict:
@@ -203,13 +205,59 @@ def _win_rates(games: int, wins: int, sum_margin: float) -> tuple:
     return raw, adjusted
 
 
-def _ranked_edges(merged: dict, meta: dict, top_n: int) -> list[dict]:
-    """Build the best+worst ranked edge list from a {other: [Σmargin, n]} dict.
+def _dragon_bucket(d: int | None) -> str | None:
+    if d is None:
+        return None
+    return "4+" if d >= 4 else str(d)
 
-    Drops pairs below MIN_EDGE_GAMES, then keeps the top_n best and top_n worst.
+
+_DRAGON_ORDER = ["0", "1", "2", "3", "4+"]
+
+
+def _split(recs: list[GameRec]) -> dict:
+    """Win-rate block for a list of GameRecs (games, win rate, adjusted, …)."""
+    games = len(recs)
+    wins = sum(1 for r in recs if r.won)
+    margin = sum(r.margin for r in recs)
+    win_rate, adjusted = _win_rates(games, wins, margin)
+    return {"games": games, "win_rate": win_rate, "adjusted_win_rate": adjusted}
+
+
+def _aggregate(recs: list[GameRec]) -> dict:
+    """Full champion stat block (overall + duration/dragon splits + GD@15)."""
+    gd = [r.gd15 for r in recs if r.gd15 is not None]
+    gd15 = round(sum(gd) / len(gd), 1) if gd else None
+
+    duration = []
+    for mins in DURATION_MINUTES:
+        sub = [r for r in recs if r.dur_s is not None and r.dur_s > mins * 60]
+        duration.append({"min_minutes": mins, **_split(sub)})
+
+    by_bucket: dict = defaultdict(list)
+    for r in recs:
+        b = _dragon_bucket(r.dragons)
+        if b is not None:
+            by_bucket[b].append(r)
+    dragons = [{"bucket": b, **_split(by_bucket[b])}
+               for b in _DRAGON_ORDER if b in by_bucket]
+
+    return {**_split(recs), "gd15": gd15,
+            "duration_splits": duration, "dragon_splits": dragons}
+
+
+def _ranked_edges(recs: list[GameRec], attr: str, meta: dict, top_n: int) -> list[dict]:
+    """Best+worst ranked edges over `recs`, grouping by each teammate/opponent.
+
+    ``attr`` is "teammates" or "opponents". Drops pairs below MIN_EDGE_GAMES, then
+    keeps the top_n best and top_n worst by shrunk win-margin weight.
     """
+    agg: dict = defaultdict(lambda: [0.0, 0])
+    for r in recs:
+        for other in getattr(r, attr):
+            agg[other][0] += r.margin
+            agg[other][1] += 1
     out = []
-    for other, (total, n) in merged.items():
+    for other, (total, n) in agg.items():
         if n < MIN_EDGE_GAMES or other not in meta:
             continue
         out.append({**meta[other], "weight": _weight(total, n), "games": n})
@@ -219,9 +267,21 @@ def _ranked_edges(merged: dict, meta: dict, top_n: int) -> list[dict]:
     return out
 
 
+def _select_records(edges: dict, champ: str, role: str | None) -> tuple:
+    """(selected GameRecs, resolved role or None, roles-summary list)."""
+    records = edges["records"]
+    champ_roles = [r for r in _ROLES if (champ, r) in records]
+    roles_summary = [{"role": r, "role_label": ROLE_LABELS.get(r, r),
+                      **_split(records[(champ, r)])} for r in champ_roles]
+    sel_role = role if role in champ_roles else None
+    use_roles = [sel_role] if sel_role else champ_roles
+    recs = [rec for r in use_roles for rec in records.get((champ, r), [])]
+    return recs, sel_role, roles_summary
+
+
 def champion_graph(session: Session, champ: str, season=None, split=None,
                    role: str | None = None, top_n: int = TOP_N) -> dict:
-    """Win rates + ranked synergies/counters for one champion, optionally by role.
+    """Stats + ranked synergies/counters for one champion, optionally by role.
 
     ``roles`` summarises each role the champion was played in. When ``role`` is given
     only that role's games are used; otherwise all roles are merged. ``synergies`` and
@@ -229,42 +289,35 @@ def champion_graph(session: Session, champ: str, season=None, split=None,
     """
     edges = build_edges(session, season, split)
     meta = edges["meta"]
-    role_games, syn, cnt = edges["role_games"], edges["syn"], edges["cnt"]
+    recs, sel_role, roles_summary = _select_records(edges, champ, role)
 
-    # Roles the champion has games in, ordered top→jng→mid→bot→sup.
-    champ_roles = [r for r in _ROLES if (champ, r) in role_games]
-    roles_summary = []
-    for r in champ_roles:
-        g, w, m = role_games[(champ, r)]
-        wr, adj = _win_rates(g, w, m)
-        roles_summary.append({"role": r, "role_label": ROLE_LABELS.get(r, r),
-                              "games": g, "win_rate": wr, "adjusted_win_rate": adj})
-
-    sel_role = role if role in champ_roles else None
-    use_roles = [sel_role] if sel_role else champ_roles
-
-    # Aggregate the selected role(s).
-    games = wins = 0
-    sum_margin = 0.0
-    merged_syn: dict = defaultdict(lambda: [0.0, 0])
-    merged_cnt: dict = defaultdict(lambda: [0.0, 0])
-    for r in use_roles:
-        g, w, m = role_games.get((champ, r), [0, 0, 0.0])
-        games += g
-        wins += w
-        sum_margin += m
-        for other, (total, n) in syn.get((champ, r), {}).items():
-            merged_syn[other][0] += total
-            merged_syn[other][1] += n
-        for other, (total, n) in cnt.get((champ, r), {}).items():
-            merged_cnt[other][0] += total
-            merged_cnt[other][1] += n
-
-    win_rate, adjusted = _win_rates(games, wins, sum_margin)
     self_meta = meta.get(champ, {"champion": champ, "champion_ddragon": "",
                                  "image_url": image_url(champ)})
     return {**self_meta, "season": season, "split": split,
             "role": sel_role, "roles": roles_summary,
-            "games": games, "win_rate": win_rate, "adjusted_win_rate": adjusted,
-            "synergies": _ranked_edges(merged_syn, meta, top_n),
-            "counters": _ranked_edges(merged_cnt, meta, top_n)}
+            "stats": _aggregate(recs),
+            "synergies": _ranked_edges(recs, "teammates", meta, top_n),
+            "counters": _ranked_edges(recs, "opponents", meta, top_n)}
+
+
+def champion_pairing(session: Session, champ: str, other: str, kind: str,
+                     season=None, split=None, role: str | None = None) -> dict:
+    """Recompute the champion's full stat block over games where `other` co-occurs.
+
+    ``kind`` is "synergy" (other is a teammate) or "counter" (other is an opponent).
+    Returns both the with-pairing ``stats`` and the champion's ``overall`` block.
+    """
+    edges = build_edges(session, season, split)
+    meta = edges["meta"]
+    recs, sel_role, _ = _select_records(edges, champ, role)
+
+    attr = "teammates" if kind == "synergy" else "opponents"
+    subset = [r for r in recs if other in getattr(r, attr)]
+
+    self_meta = meta.get(champ, {"champion": champ, "champion_ddragon": "",
+                                 "image_url": image_url(champ)})
+    other_meta = meta.get(other, {"champion": other, "champion_ddragon": "",
+                                  "image_url": image_url(other)})
+    return {**self_meta, "other": other_meta, "kind": kind,
+            "season": season, "split": split, "role": sel_role,
+            "stats": _aggregate(subset), "overall": _aggregate(recs)}

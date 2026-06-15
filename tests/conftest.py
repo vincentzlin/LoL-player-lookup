@@ -95,13 +95,15 @@ def _tier_streak_rows():
     ]
 
 
-def _draft_stat(gameid, side, team, pos, champ, result, split="Spring"):
+def _draft_stat(gameid, side, team, pos, champ, result, split="Spring",
+                gamelength_s=1800, dragons=None, golddiffat15=None):
     """A full-game roster row for the draft-graph tests (carries side + result)."""
     return PlayerGameStat(
         gameid=gameid, league="LCK", year=2024, split=split, playoffs=False,
         date="2024-02-01", playername=f"{team}_{pos}", teamname=team, side=side,
         position=pos, champion=champ, champion_ddragon=to_ddragon_id(champ),
-        kills=3, deaths=3, assists=3, gamelength_s=1800, totalgold=12000,
+        kills=3, deaths=3, assists=3, gamelength_s=gamelength_s, totalgold=12000,
+        dragons=dragons, golddiffat15=golddiffat15,
         cspm=8.0, dpm=480.0, damageshare=0.2, earnedgoldshare=0.2,
         result=result, datacompleteness="complete",
     )
@@ -126,7 +128,7 @@ def _draft_rows():
             rows.append(_draft_stat(gid, "Blue", "Alpha", pos, champ, "Win"))
         for pos, champ in _BRAVO:
             rows.append(_draft_stat(gid, "Red", "Bravo", pos, champ, "Loss"))
-    return rows + _strong_team_rows() + _multi_role_rows()
+    return rows + _strong_team_rows() + _multi_role_rows() + _cait_rows()
 
 
 def _multi_role_rows():
@@ -168,6 +170,35 @@ def _strong_team_rows():
         opp_res = "Loss" if res == "Win" else "Win"
         rows.append(_draft_stat(f"s{i}", "Blue", "Titan", "mid", "Riven", res, split="Summer"))
         rows.append(_draft_stat(f"s{i}", "Red", f"Opp{i}", "mid", "Poppy", opp_res, split="Summer"))
+    return rows
+
+
+def _cait_rows():
+    """Caitlyn (bot) for the duration/dragon/GD@15 + pairing tests, in 2024 'Winter'.
+
+    4 games with hand-picked length / dragons / gold-diff@15; teammate Lux in g1-3,
+    opponent Jinx in g1-3. All teams play < 5 games so ratings are 0 (adjusted == raw
+    within any subset). Overall GD@15 = mean(100,300,-200,0) = 50; the Lux/Jinx subset
+    (g1-3) recomputes to mean(100,300,-200) = 66.7, proving the pairing recompute.
+    """
+    # (gameid, result, length_s, dragons, gd15, teammate sup, opp bot champ)
+    games = [
+        ("c1", "Win", 1440, 1, 100.0, "Lux", "Jinx"),
+        ("c2", "Win", 1560, 2, 300.0, "Lux", "Jinx"),
+        ("c3", "Loss", 1860, 4, -200.0, "Lux", "Jinx"),
+        ("c4", "Loss", 2160, 0, 0.0, "Sona", "Kaisa"),
+    ]
+    rows = []
+    for gid, res, length, drag, gd, sup, opp_champ in games:
+        opp_res = "Loss" if res == "Win" else "Win"
+        rows += [
+            _draft_stat(gid, "Blue", "CT", "bot", "Caitlyn", res, split="Winter",
+                        gamelength_s=length, dragons=drag, golddiffat15=gd),
+            _draft_stat(gid, "Blue", "CT", "sup", sup, res, split="Winter",
+                        gamelength_s=length, dragons=drag),
+            _draft_stat(gid, "Red", f"CTO_{gid}", "bot", opp_champ, opp_res,
+                        split="Winter", gamelength_s=length),
+        ]
     return rows
 
 
