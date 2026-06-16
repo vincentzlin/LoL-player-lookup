@@ -31,7 +31,25 @@ images from Riot Data Dragon.
    ```
    It logs how many rows each pro matched — confirm Teddy/Ruler/Kiin/Zeus show `[OK]`.
 
-4. Run the app:
+4. *(Optional)* **Enrich with item timing + champion level.** Oracle's CSVs have
+   neither, so the app shows "N/A" for both until you backfill from the (unofficial,
+   public) lolesports livestats feed. This is a **long, resumable background job**
+   (~1–2h for the full ~1400 LCK games) — it writes to the DB as it goes, so the site
+   updates progressively, and it's safe to Ctrl-C and re-run (it resumes from the
+   `data/lolesports_*.json` caches):
+   ```
+   python -m backend.enrich_lolesports          # full backfill (resumable)
+   python -m backend.enrich_lolesports --max-games 50   # a quick partial slice
+   ```
+   It resolves each stored game to its lolesports game by champion-lineup + date, then
+   fills `item1/2/3_completed_s` (sampled, so timing is accurate to ~±90s) and `level`.
+   Run it **after** `load_data` (which rebuilds the table). Probe one game without
+   touching the DB:
+   ```
+   python -m backend.enrich_lolesports --probe 115548128963037588
+   ```
+
+5. Run the app:
    ```
    python run.py
    ```
@@ -44,4 +62,10 @@ images from Riot Data Dragon.
   `complete`; partial-data games still count toward game totals but are skipped
   when averaging those specific fields.
 - To refresh data later, re-download the CSVs and re-run `python -m backend.load_data`
-  (it rebuilds the table from scratch each run).
+  (it rebuilds the table from scratch each run), then re-run
+  `python -m backend.enrich_lolesports` to repopulate item timing + level. The
+  `data/lolesports_*.json` caches mean this only re-writes the DB (no re-fetching),
+  so it's quick the second time.
+- **Item timing / level are best-effort**: they come from an unofficial feed and are
+  only filled for games whose lineup+date could be matched; unmatched games stay "N/A".
+  Item timing is **sampled** (~±90s), not exact-to-the-second.

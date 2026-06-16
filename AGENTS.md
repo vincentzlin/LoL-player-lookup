@@ -42,6 +42,12 @@ pip install -r requirements-dev.txt
 #    Rebuilds the table from scratch each run.
 python -m backend.load_data
 
+# 3b. (Optional) Backfill item-completion timing + champion level from the lolesports
+#     livestats feed. Long resumable background job (~1-2h full); writes incrementally,
+#     safe to Ctrl-C + re-run. Run AFTER load_data; caches to data/lolesports_*.json.
+python -m backend.enrich_lolesports                 # full backfill
+python -m backend.enrich_lolesports --max-games 50  # quick partial slice
+
 # 4. Run the app (http://127.0.0.1:8000)
 python run.py
 
@@ -59,7 +65,10 @@ backend/
   config.py        # Paths, LCK scope, player allowlist, season map, Data Dragon URLs
   database.py      # SQLAlchemy Base, PlayerGameStat model, engine/session helpers
   champions.py     # Oracle champion name -> Data Dragon id normalization + image URLs
+  items.py         # Data Dragon item.json + "completed item" classification (enrichment)
+  lolesports.py    # Thin client for the lolesports schedule + livestats feed (enrichment)
   load_data.py     # pandas CSV -> SQLite loader (run as `python -m backend.load_data`)
+  enrich_lolesports.py  # post-load backfill: item-timing + level from the lolesports feed
   main.py          # FastAPI app: middleware, static mount, startup hooks
   api/
     routes.py      # /api endpoints
@@ -84,7 +93,19 @@ run.py             # Entry point: uvicorn backend.main:app on 127.0.0.1:8000
 CSV (`data/raw/`) → `backend/load_data.py` filters to LCK + target seasons and
 writes `player_game_stats` → `backend/api/stats.py` aggregates rows into the
 metrics on demand → `backend/api/routes.py` returns Pydantic models → the static
-frontend renders comparison tables. API surface:
+frontend renders comparison tables.
+
+Optional enrichment runs **after** the loader and is fully offline at request time:
+`backend/enrich_lolesports.py` resolves each stored game to its lolesports game
+(champion-lineup + date fingerprint — Oracle's `gameid` has no public crosswalk),
+then fills the `item1/2/3_completed_s` and `level` columns from the livestats feed. A
+`/details` call only returns ~10s of game time, so item timing is **coarse-sampled**
+(~every 90s, ~±90s accuracy) rather than paged densely; games are fetched
+**concurrently** (`ThreadPoolExecutor`, DB writes stay on the main thread) and the run
+is **resumable + incremental** — discovery + extraction cache to `data/lolesports_*.json`
+and the DB is committed every ~25 games, so Ctrl-C + re-run resumes cheaply.
+
+API surface:
 
 - `GET /api/players` — the four searchable players.
 - `GET /api/player/{name}/filters` — seasons/splits the player actually has games in.

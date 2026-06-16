@@ -99,7 +99,7 @@ def player_matches(session: Session, name: str, season=None, split=None,
 
     Each match includes the score line, both teams, the side of the Rift and the
     opposing laner (same gameid, same position, opposite side). Item-timing fields
-    are passed through (currently always None — Oracle's Elixir has no item data).
+    are passed through from the lolesports enrichment step (None when unresolved).
     """
     q = session.query(PlayerGameStat).filter(PlayerGameStat.playername == name)
     q = _apply_timeframe(q, season, split)
@@ -143,8 +143,8 @@ def match_detail(session: Session, gameid: str) -> dict | None:
 
     Returns ``None`` when the gameid isn't in the DB. Objective totals (team kills,
     towers/dragons/barons) are denormalized onto every player row, so they're read
-    from any row of a side. Champion level is unavailable in Oracle's Elixir and is
-    always ``None`` (rendered as "N/A")."""
+    from any row of a side. Champion level comes from the lolesports enrichment step
+    (``None`` — rendered as "N/A" — for games that couldn't be resolved)."""
     rows = (session.query(PlayerGameStat)
             .filter(PlayerGameStat.gameid == gameid)
             .filter(PlayerGameStat.position.in_(_ROLE_ORDER))
@@ -181,7 +181,7 @@ def match_detail(session: Session, gameid: str) -> dict | None:
                 "assists": p.assists,
                 "cs": p.total_cs,
                 "gold": p.totalgold,
-                "level": None,       # not in Oracle's Elixir
+                "level": p.level,    # from lolesports enrichment (None if unresolved)
             } for p in players],
         }
 
