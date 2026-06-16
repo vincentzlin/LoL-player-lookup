@@ -146,24 +146,34 @@ def test_pairing_recomputes_for_synergy(client):
     assert d["stats"]["win_rate"] == 66.7
 
 
+def test_throw_index_helper():
+    """Mid-rank percentile; None when too few peers or no value."""
+    assert draft._throw_index(75, [75, 0, 0]) == 83.3   # (2 below + 0.5 tie)/3
+    assert draft._throw_index(0, [75, 0, 0]) == 33.3    # (0 below + 1 tie)/3
+    assert draft._throw_index(75, [75]) is None         # < 3 peers
+    assert draft._throw_index(None, [1, 2, 3]) is None
+
+
 def test_throwing_factor_metric(client):
-    """swings +300,−300,−400,+50 → avg −87.5, factor +87.5; one throw (c2)."""
+    """One 300g throw over 4 games → 75 gold/game; index 83.3 vs Winter peers."""
     s = client.get("/api/champion/Caitlyn/graph", params=WINTER).json()["stats"]
     assert s["swing_games"] == 4
-    assert s["avg_swing"] == -87.5
-    assert s["throwing_factor"] == 87.5
-    assert s["throw_count"] == 1            # only c2: ahead at 15 (+300) then 0
+    assert s["throw_gold_pg"] == 75.0      # 300 thrown / 4 games played
+    assert s["throw_count"] == 1           # only c2: ahead at 15 (+300) then 0
     assert s["throw_rate"] == 25.0
     assert s["avg_throw_size"] == 300.0
+    # peers (Winter, all roles, ≥3 games): Caitlyn 75, Lux 0, Jinx 0 → mid-rank of 75
+    assert s["throwing_factor"] == 83.3
 
 
 def test_throwing_factor_in_pairing(client):
-    """Lux co-occurs in c1-3: swings +300,−300,−400 → avg −133.3, factor +133.3."""
+    """Lux co-occurs in c1-3: 300 thrown / 3 games = 100 gold/game → index 100."""
     d = client.get("/api/champion/Caitlyn/pairing",
                    params={**WINTER, "other": "Lux", "kind": "synergy"}).json()
     assert d["stats"]["swing_games"] == 3
-    assert d["stats"]["throwing_factor"] == 133.3
-    assert d["overall"]["throwing_factor"] == 87.5     # differs from overall
+    assert d["stats"]["throw_gold_pg"] == 100.0
+    assert d["stats"]["throwing_factor"] == 100.0      # raw 100 > all peers
+    assert d["overall"]["throwing_factor"] == 83.3     # overall ranks lower
 
 
 def test_pairing_recomputes_for_counter(client):

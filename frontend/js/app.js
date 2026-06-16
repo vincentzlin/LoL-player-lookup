@@ -352,21 +352,23 @@ function goldSigned(v) {
   return (n > 0 ? '+' : '') + n;
 }
 
-// Throwing-factor chips. Factor: positive = loses leads (red), negative = grows (green).
+// Throwing chips. Factor is a 0–100 index (higher = throwier): red ≥60, green ≤40.
 function throwingBlock(s) {
   if (!s.swing_games) {
     return '<div class="no-data">No games reaching 25 minutes in this timeframe.</div>';
   }
-  const tf = s.throwing_factor;
-  const tfCls = tf == null ? '' : (tf > 0 ? ' delta-neg' : (tf < 0 ? ' delta-pos' : ''));
+  const idx = s.throwing_factor;
+  const idxCls = idx == null ? '' : (idx >= 60 ? ' delta-neg' : (idx <= 40 ? ' delta-pos' : ''));
+  const idxTxt = idx == null ? '—' : `${idx} / 100`;
   const swCls = s.avg_swing == null ? '' : (s.avg_swing > 0 ? ' delta-pos' : (s.avg_swing < 0 ? ' delta-neg' : ''));
   const chip = (label, valHtml) =>
     `<div class="champ-stat"><span class="champ-stat-label">${label}</span>${valHtml}</div>`;
   return (
-    chip('Throwing factor', `<span class="champ-stat-val${tfCls}">${goldSigned(tf)}</span>`) +
-    chip('Avg swing 15→25', `<span class="champ-stat-val${swCls}">${goldSigned(s.avg_swing)} g</span>`) +
+    chip('Throwing factor', `<span class="champ-stat-val${idxCls}">${idxTxt}</span>`) +
+    chip('Gold thrown / game', `<span class="champ-stat-val">${s.throw_gold_pg == null ? '—' : Math.round(s.throw_gold_pg) + ' g'}</span>`) +
     chip('Throws', `<span class="champ-stat-val">${s.throw_count}${s.throw_rate == null ? '' : ` · ${s.throw_rate}%`}</span>`) +
     chip('Avg throw size', `<span class="champ-stat-val">${s.avg_throw_size == null ? '—' : Math.round(s.avg_throw_size) + ' g'}</span>`) +
+    chip('Avg swing 15→25', `<span class="champ-stat-val${swCls}">${goldSigned(s.avg_swing)} g</span>`) +
     chip('Sample', `<span class="champ-stat-val">${s.swing_games} g ≥25m</span>`)
   );
 }
@@ -473,7 +475,8 @@ function renderPairing(d) {
     ['Win rate', sub.win_rate, all.win_rate, 'pct'],
     ['Adjusted WR', sub.adjusted_win_rate, all.adjusted_win_rate, 'pct'],
     ['Gold diff @15', sub.gd15, all.gd15, 'gold'],
-    ['Throwing factor', sub.throwing_factor, all.throwing_factor, 'gold', true],
+    ['Throwing factor /100', sub.throwing_factor, all.throwing_factor, 'gold', true],
+    ['Gold thrown / game', sub.throw_gold_pg, all.throw_gold_pg, 'gold', true],
     ['Avg swing 15→25', sub.avg_swing, all.avg_swing, 'gold'],
     ['Throw rate', sub.throw_rate, all.throw_rate, 'pct', true],
     ['Win rate > 25 min', durWR(sub, 25), durWR(all, 25), 'pct'],
