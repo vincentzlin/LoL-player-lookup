@@ -30,11 +30,14 @@ class PlayerGameStat(Base):
     champion = Column(String)
     champion_ddragon = Column(String)           # normalized id for image URLs
     # Item-timing scaffold: time (seconds) the 1st/2nd/3rd item was completed.
-    # Oracle's Elixir has no item data, so these are always NULL for now — present
-    # so the metric can be populated later if a data source becomes available.
+    # Oracle's Elixir has no item data; populated by `backend.enrich_lolesports`
+    # from the lolesports livestats feed (NULL when a game can't be resolved).
     item1_completed_s = Column(Integer)
     item2_completed_s = Column(Integer)
     item3_completed_s = Column(Integer)
+    # Final champion level. Not in Oracle's Elixir; populated by the same
+    # lolesports enrichment step (NULL until/unless the game is resolved).
+    level = Column(Integer)
     kills = Column(Integer, default=0)
     deaths = Column(Integer, default=0)
     assists = Column(Integer, default=0)
@@ -73,12 +76,32 @@ def get_engine(db_path: str = DB_PATH):
     )
 
 
+# Columns added after the table first shipped. `create_all` won't ALTER an existing
+# table, so we add any missing ones in place — avoids forcing a DB delete + reload.
+_ADDED_COLUMNS = {
+    "item1_completed_s": "INTEGER",
+    "item2_completed_s": "INTEGER",
+    "item3_completed_s": "INTEGER",
+    "level": "INTEGER",
+}
+
+
+def _add_missing_columns(session: Session) -> None:
+    existing = {row[1] for row in session.execute(
+        text("PRAGMA table_info(player_game_stats)"))}
+    for col, sqltype in _ADDED_COLUMNS.items():
+        if col not in existing:
+            session.execute(
+                text(f"ALTER TABLE player_game_stats ADD COLUMN {col} {sqltype}"))
+
+
 def init_db(engine=None) -> None:
     if engine is None:
         engine = get_engine()
     Base.metadata.create_all(engine)
     with Session(engine) as session:
         session.execute(text("PRAGMA journal_mode=WAL"))
+        _add_missing_columns(session)
         session.commit()
 
 
