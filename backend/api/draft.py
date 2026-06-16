@@ -233,18 +233,53 @@ def _throwing(recs: list[GameRec]) -> dict:
     """
     swings = [(r.gd15, r.gd25) for r in recs if r.gd15 is not None and r.gd25 is not None]
     if not swings:
-        return {"swing_games": 0, "avg_swing": None, "throwing_factor": None,
-                "throw_count": 0, "throw_rate": None, "avg_throw_size": None}
+        return {"swing_games": 0, "avg_swing": None, "throw_gold_pg": None,
+                "throwing_factor": None, "throw_count": 0, "throw_rate": None,
+                "avg_throw_size": None}
     avg_swing = sum(g25 - g15 for g15, g25 in swings) / len(swings)
     throws = [g15 - g25 for g15, g25 in swings if g15 > 0 and g25 < g15]
     return {
         "swing_games": len(swings),
         "avg_swing": round(avg_swing, 1),
-        "throwing_factor": round(-avg_swing, 1),
+        # Gold of leads surrendered per game played (denominator = ALL games, so
+        # closing out before 25 min lowers it). The 0–100 index is set by the caller.
+        "throw_gold_pg": round(sum(throws) / len(recs), 1),
+        "throwing_factor": None,
         "throw_count": len(throws),
         "throw_rate": round(len(throws) / len(swings) * 100, 1),
         "avg_throw_size": round(sum(throws) / len(throws), 1) if throws else None,
     }
+
+
+MIN_INDEX_GAMES = 3   # min games for a champion to enter the throwing-index peer set
+
+
+def _raw_throw_gpg(recs: list[GameRec]) -> float | None:
+    """Gold of leads surrendered per game played (all games as denominator)."""
+    if not recs:
+        return None
+    thrown = sum(r.gd15 - r.gd25 for r in recs
+                 if r.gd15 is not None and r.gd25 is not None and r.gd15 > 0 and r.gd25 < r.gd15)
+    return thrown / len(recs)
+
+
+def _peer_raw_values(records: dict, roles: set) -> list[float]:
+    """Each LCK champion's gold-thrown-per-game, over the in-scope roles."""
+    by_champ: dict = defaultdict(list)
+    for (champ, role), recs in records.items():
+        if role in roles:
+            by_champ[champ].extend(recs)
+    return [_raw_throw_gpg(recs) for recs in by_champ.values()
+            if len(recs) >= MIN_INDEX_GAMES]
+
+
+def _throw_index(raw: float | None, peers: list[float]) -> float | None:
+    """Mid-rank percentile of `raw` among `peers` (0–100, higher = throwier)."""
+    if raw is None or len(peers) < 3:
+        return None
+    below = sum(1 for v in peers if v < raw)
+    ties = sum(1 for v in peers if v == raw)
+    return round(100 * (below + 0.5 * ties) / len(peers), 1)
 
 
 def _aggregate(recs: list[GameRec]) -> dict:
@@ -315,11 +350,15 @@ def champion_graph(session: Session, champ: str, season=None, split=None,
     meta = edges["meta"]
     recs, sel_role, roles_summary = _select_records(edges, champ, role)
 
+    stats = _aggregate(recs)
+    peers = _peer_raw_values(edges["records"], {sel_role} if sel_role else set(_ROLES))
+    stats["throwing_factor"] = _throw_index(stats["throw_gold_pg"], peers)
+
     self_meta = meta.get(champ, {"champion": champ, "champion_ddragon": "",
                                  "image_url": image_url(champ)})
     return {**self_meta, "season": season, "split": split,
             "role": sel_role, "roles": roles_summary,
-            "stats": _aggregate(recs),
+            "stats": stats,
             "synergies": _ranked_edges(recs, "teammates", meta, top_n),
             "counters": _ranked_edges(recs, "opponents", meta, top_n)}
 
@@ -338,10 +377,15 @@ def champion_pairing(session: Session, champ: str, other: str, kind: str,
     attr = "teammates" if kind == "synergy" else "opponents"
     subset = [r for r in recs if other in getattr(r, attr)]
 
+    stats, overall = _aggregate(subset), _aggregate(recs)
+    peers = _peer_raw_values(edges["records"], {sel_role} if sel_role else set(_ROLES))
+    stats["throwing_factor"] = _throw_index(stats["throw_gold_pg"], peers)
+    overall["throwing_factor"] = _throw_index(overall["throw_gold_pg"], peers)
+
     self_meta = meta.get(champ, {"champion": champ, "champion_ddragon": "",
                                  "image_url": image_url(champ)})
     other_meta = meta.get(other, {"champion": other, "champion_ddragon": "",
                                   "image_url": image_url(other)})
     return {**self_meta, "other": other_meta, "kind": kind,
             "season": season, "split": split, "role": sel_role,
-            "stats": _aggregate(subset), "overall": _aggregate(recs)}
+            "stats": stats, "overall": overall}

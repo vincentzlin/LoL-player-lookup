@@ -181,10 +181,11 @@ class ChampionStats(BaseModel):
     win_rate: float | None = None          # raw wins / games %
     adjusted_win_rate: float | None = None  # skill-adjusted (50% + avg margin)
     gd15: float | None = None              # avg gold diff @15
-    # Throwing factor (GD@15 → GD@25 lead swing). Only games reaching 25 min count.
+    # Throwing factor (GD@15 → GD@25 lead swing). Only games reaching 25 min are throws.
     swing_games: int = 0                   # games with @25 data
     avg_swing: float | None = None         # mean(GD@25 − GD@15) in gold
-    throwing_factor: float | None = None   # −avg_swing (high = loses leads)
+    throw_gold_pg: float | None = None     # gold of leads thrown per game played
+    throwing_factor: float | None = None   # 0–100 index of throw_gold_pg vs role peers
     throw_count: int = 0                   # games led at 15 but lead shrank by 25
     throw_rate: float | None = None        # throw_count / swing_games %
     avg_throw_size: float | None = None    # avg gold surrendered in throw games
