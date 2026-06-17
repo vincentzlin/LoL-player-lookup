@@ -18,6 +18,7 @@ import math
 from collections import defaultdict
 from typing import NamedTuple
 
+import numpy as np
 from sqlalchemy.orm import Session
 
 from backend.config import SEASONS, ROLE_LABELS
@@ -31,6 +32,8 @@ MIN_EDGE_GAMES = 3      # a synergy/counter edge needs this many shared games to
 P_CLAMP = (0.05, 0.95)  # clamp win rate before the logit, to avoid infinities
 TOP_N = 8               # default ranking length per category
 DURATION_MINUTES = [25, 30, 35]   # cumulative ">N min" win-rate splits
+AHEAD_MINUTES = [15, 20, 25]      # "When Ahead" break-even checkpoints
+MIN_AHEAD_GAMES = 20    # min games (with data) to estimate a break-even lead
 
 _ROLES = ["top", "jng", "mid", "bot", "sup"]
 
@@ -42,7 +45,14 @@ class GameRec(NamedTuple):
     dur_s: int | None              # game length in seconds
     dragons: int | None            # focal team's dragon total
     gd15: float | None             # focal champion's gold diff @15 (nullable)
-    gd25: float | None             # focal champion's gold diff @25 (null <25min)
+    gd20: float | None             # gold diff @20 (null <20min)
+    gd25: float | None             # gold diff @25 (null <25min)
+    xp15: float | None             # xp diff @15
+    xp20: float | None             # xp diff @20
+    xp25: float | None             # xp diff @25
+    tgd15: float | None            # team gold diff @15 (Σ side players' golddiff)
+    tgd20: float | None            # team gold diff @20
+    tgd25: float | None            # team gold diff @25
     teammates: frozenset           # other champions on the focal side
     opponents: frozenset           # champions on the opposing side
 
@@ -143,12 +153,19 @@ def _build(session: Session, season, split) -> dict:
                                           (rows_b, rows_a, -margin_a, not won_a)):
             champs = frozenset(r.champion for r in mine if r.champion)
             opponents = frozenset(r.champion for r in theirs if r.champion)
+            # Team gold diff @N = Σ the side's players' golddiffatN (full roster only).
+            tgd = {}
+            for n, attr in (("15", "golddiffat15"), ("20", "golddiffat20"), ("25", "golddiffat25")):
+                vals = [getattr(p, attr) for p in mine]
+                tgd[n] = sum(vals) if vals and all(v is not None for v in vals) else None
             for r in mine:
                 if not r.champion or not r.position:
                     continue
                 records[(r.champion, r.position)].append(GameRec(
                     margin=margin, won=won, dur_s=r.gamelength_s, dragons=r.dragons,
-                    gd15=r.golddiffat15, gd25=r.golddiffat25,
+                    gd15=r.golddiffat15, gd20=r.golddiffat20, gd25=r.golddiffat25,
+                    xp15=r.xpdiffat15, xp20=r.xpdiffat20, xp25=r.xpdiffat25,
+                    tgd15=tgd["15"], tgd20=tgd["20"], tgd25=tgd["25"],
                     teammates=champs - {r.champion}, opponents=opponents))
 
     return {"records": records, "meta": meta}
@@ -282,6 +299,82 @@ def _throw_index(raw: float | None, peers: list[float]) -> float | None:
     return round(100 * (below + 0.5 * ties) / len(peers), 1)
 
 
+_SCALE = 1000.0   # internal feature scaling for IRLS stability
+
+
+def _logistic_breakeven(diffs: list[float], wins: list[bool], offset: list[float],
+                        rounding: int, cap: int | None) -> float | None:
+    """Diff where a team-strength-adjusted logistic predicts a 50% win rate.
+
+    ``offset`` is the per-game logit of the team-strength expected score, held fixed in
+    the fit (so the break-even is reported for a neutral, equal-strength team). Ridge L2
+    on the slope keeps separable data finite. Returns None when too few games, only one
+    outcome class, or no positive diff→win trend. ``cap`` (gold) bounds the magnitude;
+    None = uncapped.
+    """
+    n = len(wins)
+    if n < MIN_AHEAD_GAMES:
+        return None
+    y = np.asarray(wins, dtype=float)
+    if y.sum() == 0 or y.sum() == n:          # need both a win and a loss
+        return None
+    xs = np.asarray(diffs, dtype=float) / _SCALE
+    off = np.asarray(offset, dtype=float)
+    X = np.column_stack([np.ones(n), xs])
+    b = np.zeros(2)
+    reg = np.array([0.0, 1.0])                # penalise the slope only (scaled units)
+    for _ in range(50):
+        p = 1.0 / (1.0 + np.exp(-(off + X @ b)))
+        W = p * (1.0 - p) + 1e-9
+        grad = X.T @ (p - y) + reg * b
+        hess = (X * W[:, None]).T @ X + np.diag(reg)
+        try:
+            step = np.linalg.solve(hess, grad)
+        except np.linalg.LinAlgError:
+            return None
+        b -= step
+        if np.max(np.abs(step)) < 1e-7:
+            break
+    b0, b1 = b
+    if not (np.isfinite(b0) and np.isfinite(b1)) or b1 <= 1e-6:
+        return None                           # flat/negative trend → meaningless
+    be = -b0 / b1 * _SCALE
+    if not np.isfinite(be):
+        return None
+    if cap is not None:
+        be = max(-cap, min(cap, be))
+    return round(be / rounding) * rounding
+
+
+def _expected_logit(r: GameRec) -> float:
+    """Logit of the team-strength expected score for this game (from the margin)."""
+    e = min(0.98, max(0.02, (1.0 if r.won else 0.0) - r.margin))
+    return math.log(e / (1.0 - e))
+
+
+def _when_ahead(recs: list[GameRec]) -> list[dict]:
+    """Per checkpoint: the (own gold, own xp, team gold) lead a 50% adjusted WR needs."""
+    gold_attr = {15: "gd15", 20: "gd20", 25: "gd25"}
+    xp_attr = {15: "xp15", 20: "xp20", 25: "xp25"}
+    team_attr = {15: "tgd15", 20: "tgd20", 25: "tgd25"}
+
+    def be(attr, rounding, cap):
+        data = [(getattr(r, attr), r.won, _expected_logit(r)) for r in recs
+                if getattr(r, attr) is not None]
+        return _logistic_breakeven([d for d, _, _ in data], [w for _, w, _ in data],
+                                   [o for _, _, o in data], rounding, cap)
+
+    out = []
+    for m in AHEAD_MINUTES:
+        out.append({
+            "minute": m,
+            "break_even_gold": be(gold_attr[m], 50, 2000),
+            "break_even_xp": be(xp_attr[m], 25, 2000),
+            "break_even_team_gold": be(team_attr[m], 50, None),
+        })
+    return out
+
+
 def _aggregate(recs: list[GameRec]) -> dict:
     """Full champion stat block (overall + duration/dragon splits + GD@15)."""
     gd = [r.gd15 for r in recs if r.gd15 is not None]
@@ -301,6 +394,7 @@ def _aggregate(recs: list[GameRec]) -> dict:
                for b in _DRAGON_ORDER if b in by_bucket]
 
     return {**_split(recs), "gd15": gd15, **_throwing(recs),
+            "when_ahead": _when_ahead(recs),
             "duration_splits": duration, "dragon_splits": dragons}
 
 

@@ -373,6 +373,27 @@ function throwingBlock(s) {
   );
 }
 
+// "When Ahead": team-strength-adjusted gold/XP lead for a 50% win rate at 15/20/25.
+// `cap` (e.g. 2000) renders out-of-range values as "2000+" / "−2000+".
+function whenAheadTable(pts) {
+  if (!pts || !pts.length) return '<div class="no-data">Not enough games to estimate.</div>';
+  const cell = (v, unit, cap) => {
+    if (v == null) return '<td>N/A</td>';
+    const cls = v < 0 ? 'delta-pos' : (v > 0 ? 'delta-neg' : '');
+    let txt;
+    if (cap != null && Math.abs(v) >= cap) txt = (v < 0 ? '−' : '') + cap + '+';
+    else txt = `${v > 0 ? '+' : ''}${Math.round(v)}`;
+    return `<td class="val-strong ${cls}">${txt}${unit}</td>`;
+  };
+  let html = '<table class="cmp"><thead><tr><th>Minute</th><th>Gold lead</th>' +
+    '<th>XP lead</th><th>Team gold lead</th></tr></thead><tbody>';
+  pts.forEach((p) => {
+    html += `<tr><td>@ ${p.minute} min</td>${cell(p.break_even_gold, ' g', 2000)}` +
+      `${cell(p.break_even_xp, ' xp', 2000)}${cell(p.break_even_team_gold, ' g', null)}</tr>`;
+  });
+  return html + '</tbody></table>';
+}
+
 // Small 3-column table (label | win rate | adjusted WR) for the split sections.
 function splitTable(firstHead, rows) {
   if (!rows.length) return '<div class="no-data">No games in this timeframe.</div>';
@@ -420,6 +441,7 @@ function renderChampionGraph(d) {
   $('champ-dragons').innerHTML = splitTable('Dragons',
     (s.dragon_splits || []).map((x) => ({ label: x.bucket, ...x })));
   $('champ-throwing').innerHTML = throwingBlock(s);
+  $('champ-whenahead').innerHTML = whenAheadTable(s.when_ahead);
 
   // Selecting a new champion/role closes any open pairing detail.
   $('champ-pairing').classList.add('hidden');

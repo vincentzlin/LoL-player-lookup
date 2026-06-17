@@ -96,14 +96,17 @@ def _tier_streak_rows():
 
 
 def _draft_stat(gameid, side, team, pos, champ, result, split="Spring",
-                gamelength_s=1800, dragons=None, golddiffat15=None, golddiffat25=None):
+                gamelength_s=1800, dragons=None, golddiffat15=None, golddiffat20=None,
+                golddiffat25=None, xpdiffat15=None, xpdiffat20=None, xpdiffat25=None):
     """A full-game roster row for the draft-graph tests (carries side + result)."""
     return PlayerGameStat(
         gameid=gameid, league="LCK", year=2024, split=split, playoffs=False,
         date="2024-02-01", playername=f"{team}_{pos}", teamname=team, side=side,
         position=pos, champion=champ, champion_ddragon=to_ddragon_id(champ),
         kills=3, deaths=3, assists=3, gamelength_s=gamelength_s, totalgold=12000,
-        dragons=dragons, golddiffat15=golddiffat15, golddiffat25=golddiffat25,
+        dragons=dragons, golddiffat15=golddiffat15, golddiffat20=golddiffat20,
+        golddiffat25=golddiffat25, xpdiffat15=xpdiffat15, xpdiffat20=xpdiffat20,
+        xpdiffat25=xpdiffat25,
         cspm=8.0, dpm=480.0, damageshare=0.2, earnedgoldshare=0.2,
         result=result, datacompleteness="complete",
     )
@@ -128,7 +131,33 @@ def _draft_rows():
             rows.append(_draft_stat(gid, "Blue", "Alpha", pos, champ, "Win"))
         for pos, champ in _BRAVO:
             rows.append(_draft_stat(gid, "Red", "Bravo", pos, champ, "Loss"))
-    return rows + _strong_team_rows() + _multi_role_rows() + _cait_rows()
+    return (rows + _strong_team_rows() + _multi_role_rows() + _cait_rows()
+            + _when_ahead_rows())
+
+
+def _when_ahead_rows():
+    """Viktor (mid) for the 'When Ahead' logistic break-even tests, 2024 'WhenAhead'.
+
+    24 thirty-minute games (so @15/@20/@25 all present): 12 led +2000 gold / +1500 xp
+    → Win, 12 even 0/0 → Loss, vs one-off opponents. The 50% crossover lands at the
+    midpoint → ~1000 gold and ~750 xp.
+    """
+    rows = []
+    for i in range(24):
+        win = i < 12
+        gd, xp = (2000.0, 1500.0) if win else (0.0, 0.0)
+        res, opp_res = ("Win", "Loss") if win else ("Loss", "Win")
+        rows.append(_draft_stat(f"wa{i}", "Blue", "WA", "mid", "Viktor", res,
+                                split="WhenAhead", gamelength_s=1800,
+                                golddiffat15=gd, golddiffat20=gd, golddiffat25=gd,
+                                xpdiffat15=xp, xpdiffat20=xp, xpdiffat25=xp))
+        # Teammate with 0 gold diff so team gold diff == Viktor's → team break-even ≈ his.
+        rows.append(_draft_stat(f"wa{i}", "Blue", "WA", "sup", "Karma", res,
+                                split="WhenAhead", gamelength_s=1800,
+                                golddiffat15=0.0, golddiffat20=0.0, golddiffat25=0.0))
+        rows.append(_draft_stat(f"wa{i}", "Red", f"WAO_{i}", "mid", "Lux", opp_res,
+                                split="WhenAhead", gamelength_s=1800))
+    return rows
 
 
 def _multi_role_rows():
