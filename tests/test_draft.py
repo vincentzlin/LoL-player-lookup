@@ -8,6 +8,8 @@ a pair seen 3× on the winning side has weight 0.5*3/(3+6)*100 = 16.7%.
 
 The endpoints query season 14 (= 2024) Spring to isolate this data.
 """
+import math
+
 from backend.api import draft
 
 TF = {"season": 14, "split": "Spring"}
@@ -174,6 +176,56 @@ def test_throwing_factor_in_pairing(client):
     assert d["stats"]["throw_gold_pg"] == 100.0
     assert d["stats"]["throwing_factor"] == 100.0      # raw 100 > all peers
     assert d["overall"]["throwing_factor"] == 83.3     # overall ranks lower
+
+
+def test_logistic_breakeven_helper():
+    """Symmetric separable data → crossover at the midpoint; degenerate → None."""
+    diffs = [0.0] * 12 + [2000.0] * 12
+    wins = [False] * 12 + [True] * 12
+    off = [0.0] * 24
+    be = draft._logistic_breakeven(diffs, wins, off, 50, 2000)
+    assert be is not None and 850 <= be <= 1150        # midpoint ≈ 1000
+    assert draft._logistic_breakeven(diffs, [True] * 24, off, 50, 2000) is None   # one class
+    assert draft._logistic_breakeven([0.0] * 10, [True, False] * 5, [0.0] * 10, 50, 2000) is None
+    # reversed trend (more gold → losses) → no positive slope → None
+    assert draft._logistic_breakeven(diffs, [True] * 12 + [False] * 12, off, 50, 2000) is None
+
+
+def test_logistic_breakeven_cap():
+    """Crossover ≈ midpoint 2500; cap=2000 bounds it, None leaves it uncapped."""
+    diffs = [1000.0] * 12 + [4000.0] * 12
+    wins = [False] * 12 + [True] * 12
+    off = [0.0] * 24
+    assert draft._logistic_breakeven(diffs, wins, off, 50, None) >= 2200
+    assert draft._logistic_breakeven(diffs, wins, off, 50, 2000) == 2000
+
+
+def test_logistic_breakeven_adjustment_shifts():
+    """A team-favoured offset raises the break-even (champ must lead more to be even)."""
+    diffs = [0.0] * 12 + [2000.0] * 12
+    wins = [False] * 12 + [True] * 12
+    base = draft._logistic_breakeven(diffs, wins, [0.0] * 24, 50, None)
+    fav = math.log(0.8 / 0.2)
+    adj = draft._logistic_breakeven(diffs, wins, [fav] * 24, 50, None)
+    assert base is not None and adj is not None and adj > base
+
+
+def test_when_ahead_stat(client):
+    """Viktor: 50% adjusted WR needs ~1000 gold / ~750 xp / ~1000 team-gold lead."""
+    pts = {p["minute"]: p for p in client.get(
+        "/api/champion/Viktor/graph",
+        params={"season": 14, "split": "WhenAhead"}).json()["stats"]["when_ahead"]}
+    assert set(pts) == {15, 20, 25}
+    assert 850 <= pts[15]["break_even_gold"] <= 1150
+    assert 600 <= pts[15]["break_even_xp"] <= 900
+    assert 850 <= pts[15]["break_even_team_gold"] <= 1150
+
+
+def test_when_ahead_na_below_min_sample(client):
+    """Caitlyn has only 4 games → all break-evens are N/A."""
+    pts = client.get("/api/champion/Caitlyn/graph", params=WINTER).json()["stats"]["when_ahead"]
+    assert pts and all(p["break_even_gold"] is None and p["break_even_xp"] is None
+                       and p["break_even_team_gold"] is None for p in pts)
 
 
 def test_pairing_recomputes_for_counter(client):

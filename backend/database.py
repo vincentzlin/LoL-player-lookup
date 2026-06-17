@@ -55,7 +55,11 @@ class PlayerGameStat(Base):
     damageshare = Column(Float)                 # 0..1
     earnedgoldshare = Column(Float)             # 0..1 (gold%)
     golddiffat15 = Column(Float)                # nullable
+    golddiffat20 = Column(Float)                # nullable (null for <20min games)
     golddiffat25 = Column(Float)                # nullable (null for <25min games)
+    xpdiffat15 = Column(Float)                  # nullable
+    xpdiffat20 = Column(Float)                  # nullable (null for <20min games)
+    xpdiffat25 = Column(Float)                  # nullable (null for <25min games)
     csdiffat15 = Column(Float)                  # nullable
     result = Column(String)                     # "Win" / "Loss" (nullable)
     datacompleteness = Column(String)

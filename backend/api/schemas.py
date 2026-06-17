@@ -176,6 +176,15 @@ class DragonSplit(BaseModel):
     adjusted_win_rate: float | None = None
 
 
+class WhenAheadPoint(BaseModel):
+    minute: int                              # 15 / 20 / 25
+    # Team-strength-adjusted gold/XP lead for a 50% win rate (− = favoured behind).
+    # Champion gold/xp are capped at ±2000; team gold is uncapped.
+    break_even_gold: float | None = None
+    break_even_xp: float | None = None
+    break_even_team_gold: float | None = None  # team gold diff lead for 50% adj WR
+
+
 class ChampionStats(BaseModel):
     games: int = 0
     win_rate: float | None = None          # raw wins / games %
@@ -189,6 +198,7 @@ class ChampionStats(BaseModel):
     throw_count: int = 0                   # games led at 15 but lead shrank by 25
     throw_rate: float | None = None        # throw_count / swing_games %
     avg_throw_size: float | None = None    # avg gold surrendered in throw games
+    when_ahead: list[WhenAheadPoint] = []  # gold/xp lead needed for 50% WR @15/20/25
     duration_splits: list[DurationSplit] = []
     dragon_splits: list[DragonSplit] = []
 
