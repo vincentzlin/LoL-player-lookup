@@ -373,23 +373,25 @@ function throwingBlock(s) {
   );
 }
 
-// "When Ahead": team-strength-adjusted gold/XP lead for a 50% win rate at 15/20/25.
-// `cap` (e.g. 2000) renders out-of-range values as "2000+" / "−2000+".
+// "When Ahead": team-strength-adjusted gold/XP/team-gold lead for a 50% win rate at
+// 15/20/25. Values are clamped to the champion's realistic range; `capped` → "{v}+".
 function whenAheadTable(pts) {
   if (!pts || !pts.length) return '<div class="no-data">Not enough games to estimate.</div>';
-  const cell = (v, unit, cap) => {
+  const cell = (v, capped, unit) => {
     if (v == null) return '<td>N/A</td>';
     const cls = v < 0 ? 'delta-pos' : (v > 0 ? 'delta-neg' : '');
-    let txt;
-    if (cap != null && Math.abs(v) >= cap) txt = (v < 0 ? '−' : '') + cap + '+';
-    else txt = `${v > 0 ? '+' : ''}${Math.round(v)}`;
+    const txt = capped
+      ? `${v < 0 ? '−' : ''}${Math.abs(Math.round(v))}+`
+      : `${v > 0 ? '+' : ''}${Math.round(v)}`;
     return `<td class="val-strong ${cls}">${txt}${unit}</td>`;
   };
   let html = '<table class="cmp"><thead><tr><th>Minute</th><th>Gold lead</th>' +
     '<th>XP lead</th><th>Team gold lead</th></tr></thead><tbody>';
   pts.forEach((p) => {
-    html += `<tr><td>@ ${p.minute} min</td>${cell(p.break_even_gold, ' g', 2000)}` +
-      `${cell(p.break_even_xp, ' xp', 2000)}${cell(p.break_even_team_gold, ' g', null)}</tr>`;
+    html += `<tr><td>@ ${p.minute} min</td>` +
+      `${cell(p.break_even_gold, p.break_even_gold_capped, ' g')}` +
+      `${cell(p.break_even_xp, p.break_even_xp_capped, ' xp')}` +
+      `${cell(p.break_even_team_gold, p.break_even_team_gold_capped, ' g')}</tr>`;
   });
   return html + '</tbody></table>';
 }
@@ -514,7 +516,16 @@ function renderPairing(d) {
     html += `<tr><td>${label}</td><td class="val-strong col-player">${fmt(a)}</td>` +
       `<td>${fmt(b)}</td>${dCell}</tr>`;
   });
-  $('champ-pairing-table').innerHTML = html + '</tbody></table>';
+  html += '</tbody></table>';
+
+  // When Ahead, recomputed for the pairing (subset) vs the champion's overall.
+  html += '<div class="pairing-wa">' +
+    '<h4 class="wa-head">When Ahead <span class="hint">— gold / XP / team-gold lead for a 50% adjusted win rate</span></h4>' +
+    `<div class="wa-sub-label">${verb} ${d.other.champion}</div>${whenAheadTable(sub.when_ahead)}` +
+    `<div class="wa-sub-label">Overall</div>${whenAheadTable(all.when_ahead)}` +
+    '</div>';
+
+  $('champ-pairing-table').innerHTML = html;
 }
 
 function champBack() {

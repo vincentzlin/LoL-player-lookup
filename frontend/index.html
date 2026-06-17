@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>LCK Pro Player Stats</title>
-  <link rel="stylesheet" href="/static/css/style.css?v=16" />
+  <link rel="stylesheet" href="/static/css/style.css?v=18" />
 </head>
 <body>
   <header class="header">
@@ -131,7 +131,7 @@
       </div>
 
       <div class="detail-section wide">
-        <h3>When Ahead <span class="hint">— your gold / XP &amp; team gold lead needed for a 50% team-strength-adjusted win rate (negative = favoured when behind)</span></h3>
+        <h3>When Ahead <span class="hint">— your gold / XP &amp; team gold lead for a 50% team-strength-adjusted win rate; clamped to each champion's realistic range (±3 SD), "+" = beyond it (negative = favoured when behind)</span></h3>
         <div id="champ-whenahead" class="cmp-wrap"></div>
       </div>
 
@@ -158,7 +158,7 @@
     <div id="loading-msg">Loading…</div>
   </div>
 
-  <script src="/static/js/api.js?v=16"></script>
-  <script src="/static/js/app.js?v=16"></script>
+  <script src="/static/js/api.js?v=18"></script>
+  <script src="/static/js/app.js?v=18"></script>
 </body>
 </html>

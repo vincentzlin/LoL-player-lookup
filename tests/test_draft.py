@@ -183,35 +183,44 @@ def test_logistic_breakeven_helper():
     diffs = [0.0] * 12 + [2000.0] * 12
     wins = [False] * 12 + [True] * 12
     off = [0.0] * 24
-    be = draft._logistic_breakeven(diffs, wins, off, 50, 2000)
-    assert be is not None and 850 <= be <= 1150        # midpoint ≈ 1000
-    assert draft._logistic_breakeven(diffs, [True] * 24, off, 50, 2000) is None   # one class
-    assert draft._logistic_breakeven([0.0] * 10, [True, False] * 5, [0.0] * 10, 50, 2000) is None
+    be = draft._logistic_breakeven(diffs, wins, off)
+    assert be is not None and 850 <= be <= 1150        # midpoint ≈ 1000 (unrounded)
+    assert draft._logistic_breakeven(diffs, [True] * 24, off) is None   # one class
+    assert draft._logistic_breakeven([0.0] * 10, [True, False] * 5, [0.0] * 10) is None
     # reversed trend (more gold → losses) → no positive slope → None
-    assert draft._logistic_breakeven(diffs, [True] * 12 + [False] * 12, off, 50, 2000) is None
+    assert draft._logistic_breakeven(diffs, [True] * 12 + [False] * 12, off) is None
 
 
-def test_logistic_breakeven_cap():
-    """Crossover ≈ midpoint 2500; cap=2000 bounds it, None leaves it uncapped."""
-    diffs = [1000.0] * 12 + [4000.0] * 12
-    wins = [False] * 12 + [True] * 12
-    off = [0.0] * 24
-    assert draft._logistic_breakeven(diffs, wins, off, 50, None) >= 2200
-    assert draft._logistic_breakeven(diffs, wins, off, 50, 2000) == 2000
+def test_edges_trims_outliers():
+    """Edges = min/max of games within ±3 SD; a freak game is excluded."""
+    assert draft._edges([0.0] * 15 + [100.0] * 15) == (0.0, 100.0)
+    assert draft._edges([0.0] * 15 + [100.0] * 15 + [10000.0]) == (0.0, 100.0)
+
+
+def test_edge_clamp():
+    """Clamp the raw break-even to the observed edges; flag when it was clamped."""
+    diffs = [0.0] * 15 + [100.0] * 15            # edges (0, 100)
+    assert draft._edge_clamp(50.0, diffs, 50) == (50, False)    # inside
+    assert draft._edge_clamp(300.0, diffs, 50) == (100, True)   # above best game
+    assert draft._edge_clamp(-300.0, diffs, 50) == (0, True)    # below worst game
+    assert draft._edge_clamp(None, diffs, 50) == (None, False)
 
 
 def test_logistic_breakeven_adjustment_shifts():
     """A team-favoured offset raises the break-even (champ must lead more to be even)."""
     diffs = [0.0] * 12 + [2000.0] * 12
     wins = [False] * 12 + [True] * 12
-    base = draft._logistic_breakeven(diffs, wins, [0.0] * 24, 50, None)
+    base = draft._logistic_breakeven(diffs, wins, [0.0] * 24)
     fav = math.log(0.8 / 0.2)
-    adj = draft._logistic_breakeven(diffs, wins, [fav] * 24, 50, None)
+    adj = draft._logistic_breakeven(diffs, wins, [fav] * 24)
     assert base is not None and adj is not None and adj > base
 
 
 def test_when_ahead_stat(client):
-    """Viktor: 50% adjusted WR needs ~1000 gold / ~750 xp / ~1000 team-gold lead."""
+    """Viktor: 50% adjusted WR needs ~1000 gold / ~750 xp / ~1000 team-gold lead.
+
+    All break-evens fall within the champion's game range, so none are clamped.
+    """
     pts = {p["minute"]: p for p in client.get(
         "/api/champion/Viktor/graph",
         params={"season": 14, "split": "WhenAhead"}).json()["stats"]["when_ahead"]}
@@ -219,6 +228,24 @@ def test_when_ahead_stat(client):
     assert 850 <= pts[15]["break_even_gold"] <= 1150
     assert 600 <= pts[15]["break_even_xp"] <= 900
     assert 850 <= pts[15]["break_even_team_gold"] <= 1150
+    assert pts[15]["break_even_gold_capped"] is False
+    assert pts[15]["break_even_team_gold_capped"] is False
+
+
+def test_when_ahead_in_pairing(client):
+    """Pairing detail carries When Ahead (incl. team gold) for both subset & overall.
+
+    Karma co-occurs in all 24 Viktor games, so the subset is well-sampled.
+    """
+    d = client.get("/api/champion/Viktor/pairing",
+                   params={"season": 14, "split": "WhenAhead",
+                           "other": "Karma", "kind": "synergy"}).json()
+    sub = {p["minute"]: p for p in d["stats"]["when_ahead"]}
+    assert 850 <= sub[15]["break_even_gold"] <= 1150
+    assert 850 <= sub[15]["break_even_team_gold"] <= 1150
+    # overall block also carries the When Ahead points
+    over = {p["minute"]: p for p in d["overall"]["when_ahead"]}
+    assert over[15]["break_even_gold"] is not None
 
 
 def test_when_ahead_na_below_min_sample(client):
