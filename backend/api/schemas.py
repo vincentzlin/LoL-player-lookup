@@ -178,11 +178,14 @@ class DragonSplit(BaseModel):
 
 class WhenAheadPoint(BaseModel):
     minute: int                              # 15 / 20 / 25
-    # Team-strength-adjusted gold/XP lead for a 50% win rate (− = favoured behind).
-    # Champion gold/xp are capped at ±2000; team gold is uncapped.
+    # Team-strength-adjusted lead for a 50% win rate (− = favoured behind). Each value is
+    # clamped to the champion's realistic game range (±3 SD); `*_capped` marks a clamp.
     break_even_gold: float | None = None
+    break_even_gold_capped: bool = False
     break_even_xp: float | None = None
+    break_even_xp_capped: bool = False
     break_even_team_gold: float | None = None  # team gold diff lead for 50% adj WR
+    break_even_team_gold_capped: bool = False
 
 
 class ChampionStats(BaseModel):

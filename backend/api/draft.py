@@ -300,17 +300,18 @@ def _throw_index(raw: float | None, peers: list[float]) -> float | None:
 
 
 _SCALE = 1000.0   # internal feature scaling for IRLS stability
+EDGE_SD = 3.0     # break-even is clamped to the champion's games within ±this many SD
 
 
-def _logistic_breakeven(diffs: list[float], wins: list[bool], offset: list[float],
-                        rounding: int, cap: int | None) -> float | None:
-    """Diff where a team-strength-adjusted logistic predicts a 50% win rate.
+def _logistic_breakeven(diffs: list[float], wins: list[bool],
+                        offset: list[float]) -> float | None:
+    """Raw diff where a team-strength-adjusted logistic predicts a 50% win rate.
 
     ``offset`` is the per-game logit of the team-strength expected score, held fixed in
     the fit (so the break-even is reported for a neutral, equal-strength team). Ridge L2
     on the slope keeps separable data finite. Returns None when too few games, only one
-    outcome class, or no positive diff→win trend. ``cap`` (gold) bounds the magnitude;
-    None = uncapped.
+    outcome class, or no positive diff→win trend. The result is unrounded and unbounded —
+    callers clamp it to the champion's realistic range via ``_edge_clamp``.
     """
     n = len(wins)
     if n < MIN_AHEAD_GAMES:
@@ -339,11 +340,27 @@ def _logistic_breakeven(diffs: list[float], wins: list[bool], offset: list[float
     if not (np.isfinite(b0) and np.isfinite(b1)) or b1 <= 1e-6:
         return None                           # flat/negative trend → meaningless
     be = -b0 / b1 * _SCALE
-    if not np.isfinite(be):
-        return None
-    if cap is not None:
-        be = max(-cap, min(cap, be))
-    return round(be / rounding) * rounding
+    return be if np.isfinite(be) else None
+
+
+def _edges(diffs: list[float]) -> tuple[float, float]:
+    """The worst/best (min/max) diff the champion reached, ignoring games > EDGE_SD away."""
+    a = np.asarray(diffs, dtype=float)
+    mu, sd = a.mean(), a.std()
+    inl = a[np.abs(a - mu) <= EDGE_SD * sd] if sd > 0 else a
+    if inl.size == 0:
+        inl = a
+    return float(inl.min()), float(inl.max())
+
+
+def _edge_clamp(raw: float | None, diffs: list[float], rounding: int) -> tuple:
+    """Clamp the raw break-even to the champion's realistic game range → (value, capped)."""
+    if raw is None:
+        return None, False
+    lo, hi = _edges(diffs)
+    capped = raw < lo or raw > hi
+    val = min(hi, max(lo, raw))
+    return round(val / rounding) * rounding, capped
 
 
 def _expected_logit(r: GameRec) -> float:
@@ -358,19 +375,23 @@ def _when_ahead(recs: list[GameRec]) -> list[dict]:
     xp_attr = {15: "xp15", 20: "xp20", 25: "xp25"}
     team_attr = {15: "tgd15", 20: "tgd20", 25: "tgd25"}
 
-    def be(attr, rounding, cap):
+    def be(attr, rounding):
         data = [(getattr(r, attr), r.won, _expected_logit(r)) for r in recs
                 if getattr(r, attr) is not None]
-        return _logistic_breakeven([d for d, _, _ in data], [w for _, w, _ in data],
-                                   [o for _, _, o in data], rounding, cap)
+        diffs = [d for d, _, _ in data]
+        raw = _logistic_breakeven(diffs, [w for _, w, _ in data], [o for _, _, o in data])
+        return _edge_clamp(raw, diffs, rounding)   # (value, capped)
 
     out = []
     for m in AHEAD_MINUTES:
+        g_val, g_cap = be(gold_attr[m], 50)
+        x_val, x_cap = be(xp_attr[m], 25)
+        t_val, t_cap = be(team_attr[m], 50)
         out.append({
             "minute": m,
-            "break_even_gold": be(gold_attr[m], 50, 2000),
-            "break_even_xp": be(xp_attr[m], 25, 2000),
-            "break_even_team_gold": be(team_attr[m], 50, None),
+            "break_even_gold": g_val, "break_even_gold_capped": g_cap,
+            "break_even_xp": x_val, "break_even_xp_capped": x_cap,
+            "break_even_team_gold": t_val, "break_even_team_gold_capped": t_cap,
         })
     return out
 
