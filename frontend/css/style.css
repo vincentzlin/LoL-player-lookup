@@ -159,6 +159,34 @@ body {
   border-radius: var(--radius); padding: 20px 24px; margin-top: 12px;
 }
 .group-sub { color: var(--text-muted); font-size: 13px; font-weight: 600; }
+
+/* Team Elo badge (VIN-21) */
+.group-elo {
+  margin-left: auto; display: flex; flex-direction: column; align-items: flex-end;
+  gap: 6px; text-align: right;
+}
+.elo-main { display: flex; align-items: baseline; gap: 6px; }
+.elo-rating { font-size: 30px; font-weight: 800; color: var(--accent); line-height: 1; }
+.elo-rating-label {
+  font-size: 11px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase;
+  color: var(--text-muted);
+}
+.elo-meta {
+  display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px 12px;
+  font-size: 12px; color: var(--text-muted);
+}
+.elo-form { display: flex; align-items: center; gap: 5px; }
+.elo-form-label {
+  font-size: 11px; font-weight: 600; color: var(--text-muted); margin-right: 2px;
+}
+.form-dot {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px; border-radius: 50%;
+  font-size: 10px; font-weight: 700; color: #000;
+}
+.form-dot.win { background: var(--win); }
+.form-dot.loss { background: var(--loss); }
+
 .group-list { display: flex; flex-direction: column; gap: 10px; margin-top: 16px; }
 .group-card {
   display: flex; align-items: center; justify-content: space-between; gap: 16px;

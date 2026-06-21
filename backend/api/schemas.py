@@ -129,9 +129,21 @@ class RoleInfo(BaseModel):
     player_count: int
 
 
+class TeamElo(BaseModel):
+    rating: int
+    rank: int
+    team_count: int                    # ranked among N teams
+    peak: int
+    series_played: int
+    wins: int
+    losses: int
+    recent_form: list[str] = []        # ["W","L",...] most-recent first
+
+
 class TeamGroupResponse(BaseModel):
     team: str
     players: list[PlayerCard] = []
+    elo: TeamElo | None = None
 
 
 class RoleGroupResponse(BaseModel):

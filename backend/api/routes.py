@@ -3,7 +3,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 from backend.config import PLAYERS, find_player, distinct_roles
 from backend.database import get_session
-from backend.api import stats, draft
+from backend.api import stats, draft, elo
 from backend.api.schemas import (
     PlayerInfo, FiltersResponse, StatsResponse, Metrics, ChampionMetrics, Streak,
     MatchSummary, MatchDetail, TeamInfo, RoleInfo, TeamGroupResponse, RoleGroupResponse,
@@ -48,7 +48,9 @@ def team_group(team: str):
     with get_session() as session:
         if team not in stats.distinct_teams(session):
             raise HTTPException(status_code=404, detail=f"'{team}' is not a known team.")
-        return stats.team_group(session, team)
+        data = stats.team_group(session, team)
+        data["elo"] = elo.team_elo(session, team)
+        return data
 
 
 @router.get("/role/{role}", response_model=RoleGroupResponse)
