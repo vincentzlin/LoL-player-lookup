@@ -245,6 +245,8 @@ function renderGroup(kind, data) {
   $('group-sub').textContent =
     `${kind === 'team' ? 'Team' : 'Role'} · ${plural(players.length)}`;
 
+  renderTeamElo(kind === 'team' ? data.elo : null);
+
   const list = $('group-list');
   list.innerHTML = '';
   if (!players.length) {
@@ -272,6 +274,30 @@ function renderGroup(kind, data) {
     card.onclick = () => selectPlayer(p.name);
     list.appendChild(card);
   });
+}
+
+// Team Elo badge (VIN-21): current rating, rank, peak, recent series form.
+function renderTeamElo(elo) {
+  const box = $('group-elo');
+  if (!elo) { box.classList.add('hidden'); box.innerHTML = ''; return; }
+  const dots = (elo.recent_form || [])
+    .map((r) => `<span class="form-dot ${r === 'W' ? 'win' : 'loss'}">${r}</span>`)
+    .join('');
+  const form = dots
+    ? `<div class="elo-form"><span class="elo-form-label">Recent</span>${dots}</div>`
+    : '';
+  box.innerHTML =
+    `<div class="elo-main">` +
+      `<span class="elo-rating">${elo.rating}</span>` +
+      `<span class="elo-rating-label">Elo</span>` +
+    `</div>` +
+    `<div class="elo-meta">` +
+      `<span>#${elo.rank} of ${elo.team_count}</span>` +
+      `<span>Peak ${elo.peak}</span>` +
+      `<span>${elo.wins}–${elo.losses} series</span>` +
+    `</div>` +
+    form;
+  box.classList.remove('hidden');
 }
 
 // ── Champion draft graph (VIN-20) ─────────────────────────────────────────────
