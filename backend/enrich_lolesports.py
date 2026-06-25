@@ -310,6 +310,28 @@ def _apply(row_map: dict, extracted: dict) -> int:
     return n
 
 
+def apply_cached(session: Session) -> int:
+    """Write cached enrichment onto the current DB rows. Returns #rows updated.
+
+    Network-free: re-uses the two ``data/`` caches written by a prior ``run()`` to
+    restore ``item*_completed_s`` + ``level`` after a ``load_data`` rebuild (which
+    wipes the table). Resolves each game's lineup fingerprint to an esports game id,
+    then applies the cached values. Safe no-op if either cache is missing.
+    """
+    index = _load_json(INDEX_CACHE)
+    cache = _load_json(ENRICH_CACHE)
+    if not index or not cache:
+        return 0
+    by_date = index_by_date(index.get("games", []))
+    updated = 0
+    for fp in oracle_fingerprints(session.query(PlayerGameStat).all()).values():
+        esid = resolve_game(fp, by_date)
+        if esid and esid in cache:
+            updated += _apply(fp["by_champ"], cache[esid])
+    session.commit()
+    return updated
+
+
 def run(refresh_index: bool = False, limit_index: int | None = None,
         max_games: int | None = None, workers: int = DEFAULT_WORKERS,
         step_s: int = DEFAULT_STEP_S) -> None:
@@ -338,15 +360,10 @@ def run(refresh_index: bool = False, limit_index: int | None = None,
                  len(resolved), len(fps), 100 * len(resolved) / max(len(fps), 1))
 
         # Apply anything already in the cache up front (free), then fetch the rest.
-        to_fetch = []
-        updated = cached_count = 0
-        for gameid, fp, esid in resolved:
-            if esid in cache:
-                updated += _apply(fp["by_champ"], cache[esid])
-                cached_count += 1
-            elif esid in index_by_id:
-                to_fetch.append((gameid, fp, esid))
-        session.commit()
+        updated = apply_cached(session)
+        to_fetch = [(gameid, fp, esid) for gameid, fp, esid in resolved
+                    if esid not in cache and esid in index_by_id]
+        cached_count = len(resolved) - len(to_fetch)
         if max_games:
             to_fetch = to_fetch[:max_games]
         log.info("%d games already cached, %d to fetch", cached_count, len(to_fetch))

@@ -164,6 +164,17 @@ def load(paths: list[Path]) -> None:
             total += len(rows)
             log.info("  + %d LCK rows from %s", len(rows), path.name)
 
+    # Oracle's Elixir has no item/level data; a fresh load leaves those columns NULL
+    # (→ "N/A" in the UI). Restore them from the lolesports enrichment cache so a CSV
+    # reload doesn't blank them. Best-effort: a missing cache must never fail the load.
+    try:
+        from backend import enrich_lolesports
+        with Session(engine) as session:
+            n = enrich_lolesports.apply_cached(session)
+        log.info("Re-applied lolesports enrichment to %d rows from cache.", n)
+    except Exception as exc:  # noqa: BLE001 - enrichment is best-effort
+        log.warning("Could not re-apply enrichment cache: %s", exc)
+
     log.info("Done. Loaded %d LCK player-game rows total.", total)
     for name, n in pro_hits.items():
         flag = "OK" if n else "!! NOT FOUND"
