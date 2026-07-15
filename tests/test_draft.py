@@ -10,7 +10,10 @@ The endpoints query season 14 (= 2024) Spring to isolate this data.
 """
 import math
 
+from sqlalchemy.orm import Session
+
 from backend.api import draft
+from backend.database import get_engine, init_db, PlayerGameStat
 
 TF = {"season": 14, "split": "Spring"}
 FALL = {"season": 14, "split": "Fall"}
@@ -124,6 +127,7 @@ def test_adjusted_win_rate_recenters_for_a_strong_team(client):
 # ── Duration / dragon splits + GD@15 + pairing recompute (Caitlyn fixture) ─────
 
 WINTER = {"season": 14, "split": "Winter"}
+LEAD = {"season": 14, "split": "Lead"}
 
 
 def test_overall_gd15_and_splits(client):
@@ -255,6 +259,33 @@ def test_when_ahead_na_below_min_sample(client):
                        and p["break_even_team_gold"] is None for p in pts)
 
 
+def test_meaningful_lead_stat(client):
+    """Ziggs: mean of 80/60/40/20 = 50.0 over the 4 games carrying gold data (5 played)."""
+    s = client.get("/api/champion/Ziggs/graph", params=LEAD).json()["stats"]
+    assert s["games"] == 5
+    assert s["lead_games"] == 4          # the NULL game is out of the mean, not counted as 0
+    assert s["meaningful_lead_pct"] == 50.0
+
+
+def test_meaningful_lead_in_pairing(client):
+    """Pairing detail carries the meaningful lead for both subset and overall."""
+    d = client.get("/api/champion/Ziggs/pairing",
+                   params={**LEAD, "other": "Zilean", "kind": "counter"}).json()
+    assert d["stats"]["meaningful_lead_pct"] == 50.0
+    assert d["overall"]["meaningful_lead_pct"] == 50.0
+
+
+def test_meaningful_lead_na_without_gold_data(client):
+    """Caitlyn's rows predate the gold backfill → N/A with an explicit 0 sample.
+
+    N/A and 0% must stay distinguishable in the response, so the UI can say "no data"
+    rather than "never ahead".
+    """
+    s = client.get("/api/champion/Caitlyn/graph", params=WINTER).json()["stats"]
+    assert s["meaningful_lead_pct"] is None
+    assert s["lead_games"] == 0
+
+
 def test_pairing_recomputes_for_counter(client):
     d = client.get("/api/champion/Caitlyn/pairing",
                    params={**WINTER, "other": "Jinx", "kind": "counter"}).json()
@@ -312,3 +343,74 @@ def test_counters_filtered_by_role(client):
                      params={**FALL, "role": "jng"}).json()
     cnt = {e["champion"]: e for e in jng["counters"]}
     assert cnt["Galio"]["weight"] > 0 and cnt["Galio"]["games"] == 3
+
+
+# ── Cache invalidation ───────────────────────────────────────────────────────
+
+def _cache_rows(pct=None):
+    """Four 2024 'Cache' games: Ekko (mid, Blue) beats Zed (mid, Red)."""
+    rows = []
+    for i in range(4):
+        for side, team, champ, res in (("Blue", "CA", "Ekko", "Win"),
+                                       ("Red", "CB", "Zed", "Loss")):
+            rows.append(PlayerGameStat(
+                gameid=f"cache{i}", league="LCK", year=2024, split="Cache",
+                playoffs=False, date="2024-03-01", playername=f"{team}_mid",
+                teamname=team, side=side, position="mid", champion=champ,
+                champion_ddragon=champ, gamelength_s=1800, result=res,
+                meaningful_lead_pct=pct))
+    return rows
+
+
+def test_cache_invalidates_when_another_connection_writes(tmp_path):
+    """A commit from another connection must invalidate the cache.
+
+    `enrich_lolesports` writes to the *live* DB, so without this the API serves
+    pre-backfill stats until someone restarts the server — silently, with no error. This
+    is exactly the bug that made Meaningful Lead % read "no gold data" after a backfill.
+
+    Uses its own DB (not the session-scoped seeded one) so the write can't leak into
+    other tests, and two engines so the write really comes from a *different* connection
+    — data_version only bumps for external commits.
+    """
+    db = tmp_path / "cache.db"
+    reader = get_engine(str(db))          # stands in for the long-lived server
+    init_db(reader)
+    with Session(reader) as s:
+        s.add_all(_cache_rows(pct=None))
+        s.commit()
+
+    draft.clear_cache()
+    with Session(reader) as s:
+        recs = draft.build_edges(s)["records"][("Ekko", "mid")]
+        assert len(recs) == 4 and all(r.lead_pct is None for r in recs)
+
+    writer = get_engine(str(db))          # stands in for the backfill process
+    with Session(writer) as s2:
+        for r in s2.query(PlayerGameStat).filter_by(champion="Ekko"):
+            r.meaningful_lead_pct = 50.0
+        s2.commit()
+
+    with Session(reader) as s:
+        recs = draft.build_edges(s)["records"][("Ekko", "mid")]
+    assert [r.lead_pct for r in recs] == [50.0] * 4, "cache served stale pre-write data"
+
+
+def test_cache_is_reused_when_db_unchanged(client, monkeypatch):
+    """The invalidation must not silently disable caching.
+
+    Without this, the fix would make every request rebuild the full edge map over ~13.7k
+    rows — correct, but a large hidden cost that no other test would catch.
+    """
+    calls = []
+    real_build = draft._build
+
+    def counting(session, season, split):
+        calls.append((season, split))
+        return real_build(session, season, split)
+
+    monkeypatch.setattr(draft, "_build", counting)
+    draft.clear_cache()
+    for _ in range(3):
+        client.get("/api/champion/Ziggs/graph", params=LEAD)
+    assert len(calls) == 1, f"rebuilt {len(calls)}x for identical unchanged requests"

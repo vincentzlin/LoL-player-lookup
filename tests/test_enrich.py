@@ -1,15 +1,17 @@
 """Unit tests for the lolesports enrichment logic (pure functions, no network).
 
-Covers the three pieces most likely to break: the completed-item classifier, the
-fingerprint game resolver, and item-timing/level extraction from frames.
+Covers the pieces most likely to break: the completed-item classifier, the fingerprint
+game resolver, item-timing/level extraction, and the gold-curve → meaningful-lead maths
+(including the /window feed's clamp-past-game-end behaviour).
 """
 import datetime as dt
 from collections import Counter
 
-from backend import items
+from backend import items, lolesports
 from backend.enrich_lolesports import (
     resolve_game, extract_game, oracle_fingerprints, index_by_date,
-    all_have_three_items,
+    all_have_three_items, lane_opponents, extract_gold_series, meaningful_lead_pct,
+    game_lead_pcts, sample_game_gold, _apply_gold,
 )
 from backend.database import PlayerGameStat
 
@@ -226,3 +228,151 @@ def test_apply_is_case_insensitive():
         "item3_completed_s": None, "level": 16}})
     assert n == 1
     assert row.level == 16 and row.item1_completed_s == 600
+
+
+# ── Gold curves / Meaningful lead % ──────────────────────────────────────────
+
+def _gold_meta(pairs, start=START):
+    """Minimal index metadata: `pairs` is [(position, blue_champ, red_champ), ...].
+
+    participant_ids follow the feed's convention — 1-5 Blue, 6-10 Red.
+    """
+    players = {"Blue": [], "Red": []}
+    for i, (pos, blue, red) in enumerate(pairs):
+        players["Blue"].append({"participant_id": i + 1, "role": pos,
+                                "position": pos, "champion": blue})
+        players["Red"].append({"participant_id": i + 6, "role": pos,
+                               "position": pos, "champion": red})
+    return {"esports_game_id": "ES1", "patch": "14.1", "start": start,
+            "sides": {s: [p["champion"] for p in v] for s, v in players.items()},
+            "players": players}
+
+
+def test_lane_opponents_pairs_by_position():
+    opps = lane_opponents(_gold_meta([("top", "Darius", "Teemo"), ("mid", "Viktor", "Lux")]))
+    # Pairing is symmetric: each champion maps to its same-position rival.
+    assert opps == {"Darius": "Teemo", "Teemo": "Darius",
+                    "Viktor": "Lux", "Lux": "Viktor"}
+
+
+def test_lane_opponents_skips_duplicated_position():
+    """Two champions share a position → no 1-to-1 rival, so the pair is dropped."""
+    meta = _gold_meta([("mid", "Viktor", "Lux"), ("mid", "Ziggs", "Syndra")])
+    assert lane_opponents(meta) == {}
+
+
+def test_meaningful_lead_pct_half_the_window():
+    # 11 samples (minutes 0-10); the window is minutes 5-10 (6 samples).
+    # Ahead at 5,6,7 (ratio 1.2) and level at 8,9,10 → 3/6 = 50%.
+    mine = [500] * 5 + [1200, 1200, 1200, 1000, 1000, 1000]
+    theirs = [500] * 5 + [1000, 1000, 1000, 1000, 1000, 1000]
+    assert meaningful_lead_pct(mine, theirs) == 50.0
+
+
+def test_meaningful_lead_pct_ignores_the_first_five_minutes():
+    """Ahead only before 5:00 → 0%, and the denominator is the window, not the game.
+
+    Guards both halves of the rule: the floor is applied, *and* the early samples are
+    excluded from the denominator rather than counted as "not ahead".
+    """
+    mine = [5000] * 5 + [1000] * 6      # huge lead minutes 0-4, level 5-10
+    theirs = [500] * 5 + [1000] * 6
+    assert meaningful_lead_pct(mine, theirs) == 0.0
+
+
+def test_meaningful_lead_pct_ratio_boundary_is_inclusive():
+    """The 5% bar is `>=`: 1050 vs 1000 counts, 1049 does not."""
+    base = [1000] * 11
+    assert meaningful_lead_pct([1000] * 5 + [1050] * 6, base) == 100.0
+    assert meaningful_lead_pct([1000] * 5 + [1049] * 6, base) == 0.0
+
+
+def test_meaningful_lead_pct_short_game_is_none_not_zero():
+    """A game ending before the 5:00 floor has no window → None, not 0.0.
+
+    "No data" and "never ahead" are different facts; collapsing them would drag every
+    champion's average toward 0.
+    """
+    assert meaningful_lead_pct([500, 800, 1100], [500, 700, 900]) is None
+    assert meaningful_lead_pct([], []) is None
+
+
+def test_meaningful_lead_pct_zero_opponent_gold():
+    """0 opposing gold must not raise: any positive gold is a lead, 0-vs-0 is not."""
+    assert meaningful_lead_pct([1] * 11, [0] * 11) == 100.0
+    assert meaningful_lead_pct([0] * 11, [0] * 11) == 0.0
+
+
+def test_extract_gold_series_drops_ragged():
+    """A champion missing from a snapshot would misalign index→minute, so it's dropped."""
+    meta = _gold_meta([("top", "Darius", "Teemo")])
+    snaps = [
+        {"ts": _ts(0), "state": "in_game", "gold": {1: 500, 6: 500}},
+        {"ts": _ts(60), "state": "in_game", "gold": {1: 900}},          # Teemo (pid 6) missing
+        {"ts": _ts(120), "state": "in_game", "gold": {1: 1400, 6: 1200}},
+    ]
+    series = extract_gold_series(meta, snaps)
+    assert series == {"Darius": [500, 900, 1400]}       # Teemo's 2-sample series dropped
+
+
+def test_extract_gold_series_orders_by_timestamp():
+    meta = _gold_meta([("top", "Darius", "Teemo")])
+    snaps = [
+        {"ts": _ts(120), "state": "in_game", "gold": {1: 1400, 6: 1200}},
+        {"ts": _ts(0), "state": "in_game", "gold": {1: 500, 6: 500}},
+        {"ts": _ts(60), "state": "in_game", "gold": {1: 900, 6: 800}},
+    ]
+    assert extract_gold_series(meta, snaps)["Darius"] == [500, 900, 1400]
+
+
+def test_sample_game_gold_stops_on_finished(monkeypatch):
+    """The feed clamps to the final frame forever past game end (HTTP 200, state
+    "finished") — unlike /details, which returns None. Without a state check this loops to
+    MAX_GOLD_MINUTES and pads the series with frozen end-of-game gold.
+    """
+    calls = []
+
+    def fake(game_id, when):
+        calls.append(when)
+        state = "in_game" if len(calls) <= 10 else "finished"
+        return {"ts": _ts(60 * len(calls)), "state": state, "gold": {1: 500, 6: 500}}
+
+    monkeypatch.setattr(lolesports, "window_frames_at", fake)
+    out = sample_game_gold("ES1", START)
+    # 10 in_game samples kept; the finished frame is dropped (its ts is off the grid).
+    assert len(out) == 10
+    assert all(s["state"] == "in_game" for s in out)
+    assert len(calls) == 11                       # stopped, not run to the 60-min hard stop
+
+
+def test_sample_game_gold_stops_on_missing_frame(monkeypatch):
+    monkeypatch.setattr(lolesports, "window_frames_at", lambda g, w: None)
+    assert sample_game_gold("ES1", START) == []
+
+
+def test_game_lead_pcts_skips_champion_without_opponent():
+    """A champion whose lane rival has no series can't be scored, so it's omitted."""
+    meta = _gold_meta([("top", "Darius", "Teemo"), ("mid", "Viktor", "Lux")])
+    series = {"Darius": [1200] * 11, "Teemo": [1000] * 11, "Viktor": [1000] * 11}
+    pcts = game_lead_pcts(meta, series)
+    assert pcts == {"Darius": 100.0, "Teemo": 0.0}     # Viktor dropped: Lux has no series
+
+
+def test_apply_gold_writes_only_the_lead_column():
+    """The gold pass must never touch item/level — its cache has no item data."""
+    row = _row("g", "Darius", "top", "Blue")
+    row.level, row.item1_completed_s = 16, 600
+    meta = _gold_meta([("top", "Darius", "Teemo")])
+    n = _apply_gold({"darius": row}, meta, {"Darius": [1200] * 11, "Teemo": [1000] * 11})
+    assert n == 1
+    assert row.meaningful_lead_pct == 100.0
+    assert row.level == 16 and row.item1_completed_s == 600   # untouched
+
+
+def test_apply_gold_is_case_insensitive():
+    """Feed sends "FiddleSticks"; by_champ is keyed "fiddlesticks" (mirrors _apply)."""
+    row = _row("g", "Fiddlesticks", "mid", "Blue")
+    meta = _gold_meta([("mid", "FiddleSticks", "Lux")])
+    n = _apply_gold({"fiddlesticks": row}, meta,
+                    {"FiddleSticks": [1200] * 11, "Lux": [1000] * 11})
+    assert n == 1 and row.meaningful_lead_pct == 100.0

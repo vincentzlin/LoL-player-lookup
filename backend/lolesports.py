@@ -150,6 +150,40 @@ def window_metadata(game_id: str | int) -> dict | None:
     }
 
 
+def window_frames_at(game_id: str | int, when: dt.datetime) -> dict | None:
+    """One ``/window`` snapshot at/after ``when`` → ``{ts, state, gold}`` or None.
+
+    ``gold`` maps participantId (1-5 Blue, 6-10 Red) → ``totalGold`` (includes the 500
+    starting gold). ``state`` is the frame's ``gameState``: "in_game" / "finished".
+
+    Unlike ``/details``, the feed does **not** stop responding past the end of the game —
+    it serves the final frame clamped, with state "finished", indefinitely (HTTP 200).
+    Callers must therefore stop on ``state == "finished"``; a falsy check like the one
+    ``details_at`` permits would never terminate. See ``sample_game_gold``.
+
+    ``/details`` carries ``totalGoldEarned``, not ``totalGold`` — hence this endpoint.
+    """
+    starting = _floor_10s(when).strftime("%Y-%m-%dT%H:%M:%SZ")
+    try:
+        w = _get(f"{LIVESTATS}/window/{game_id}", params={"startingTime": starting})
+    except urllib.error.HTTPError as exc:
+        log.debug("window %s @ %s: HTTP %s", game_id, starting, exc.code)
+        return None
+    frames = w.get("frames") or []
+    if not frames:
+        return None
+    # Last frame, not first: the ~10s span of a boundary call can straddle the game end,
+    # and we want to observe the in_game → finished transition rather than miss it.
+    f = frames[-1]
+    gold: dict[int, int] = {}
+    for side in ("blueTeam", "redTeam"):
+        for p in (f.get(side) or {}).get("participants", []) or []:
+            pid, g = p.get("participantId"), p.get("totalGold")
+            if pid is not None and g is not None:
+                gold[pid] = g
+    return {"ts": f.get("rfc460Timestamp"), "state": f.get("gameState"), "gold": gold}
+
+
 def details_at(game_id: str | int, when: dt.datetime) -> dict | None:
     """One ``/details`` snapshot at/after ``when`` → ``{ts, participants}`` or None.
 

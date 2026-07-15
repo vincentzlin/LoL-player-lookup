@@ -399,6 +399,23 @@ function throwingBlock(s) {
   );
 }
 
+// Meaningful lead: avg % of the game (5:00 → end) with ≥5% more total gold than the lane
+// opponent. Green ≥55 (usually ahead), red ≤45. The sample counts only games with
+// lolesports gold data, so it can sit well below the champion's total games played.
+function meaningfulLeadBlock(s) {
+  if (!s.lead_games) {
+    return '<div class="no-data">No games with lolesports gold data in this timeframe.</div>';
+  }
+  const v = s.meaningful_lead_pct;
+  const cls = v == null ? '' : (v >= 55 ? ' delta-pos' : (v <= 45 ? ' delta-neg' : ''));
+  const chip = (label, valHtml) =>
+    `<div class="champ-stat"><span class="champ-stat-label">${label}</span>${valHtml}</div>`;
+  return (
+    chip('Meaningful lead', `<span class="champ-stat-val${cls}">${v == null ? '—' : `${v}%`}</span>`) +
+    chip('Sample', `<span class="champ-stat-val">${s.lead_games} g with gold data</span>`)
+  );
+}
+
 // "When Ahead": team-strength-adjusted gold/XP/team-gold lead for a 50% win rate at
 // 15/20/25. Values are clamped to the champion's realistic range; `capped` → "{v}+".
 function whenAheadTable(pts) {
@@ -454,6 +471,7 @@ function renderChampionGraph(d) {
   Charts.lineChart('champ-duration', s.duration_splits || []);
   Charts.lollipopChart('champ-dragons', s.dragon_splits || []);
   $('champ-throwing').innerHTML = throwingBlock(s);
+  $('champ-lead').innerHTML = meaningfulLeadBlock(s);
   Charts.scatterChart('champ-whenahead', s.when_ahead || []);
 
   // Selecting a new champion/role closes any open pairing detail.

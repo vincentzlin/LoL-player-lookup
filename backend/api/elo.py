@@ -24,7 +24,7 @@ from typing import NamedTuple
 
 from sqlalchemy.orm import Session
 
-from backend.database import PlayerGameStat
+from backend.database import PlayerGameStat, data_version
 
 # ── Tunable constants ─────────────────────────────────────────────────────────
 BASE = 1500.0       # starting / mean rating
@@ -48,6 +48,8 @@ class Series(NamedTuple):
 
 # id(engine) -> {"teams": {team: {...}}, "ranked": [team, ...]}
 _cache: dict = {}
+# id(engine) -> the SQLite data_version the cache was built at (see _data)
+_cache_version: dict = {}
 
 
 # ── Build: rows → matches → series ────────────────────────────────────────────
@@ -150,14 +152,26 @@ def _build(session: Session) -> dict:
 
 
 def _data(session: Session) -> dict:
+    """Built (and cached) team ratings.
+
+    Dropped whenever the DB changed under us — the offline backfills write to the live
+    DB, so a process-lifetime cache would serve pre-change ratings until a restart, with
+    no error to notice. Same guard as `draft.build_edges`.
+    """
     key = id(session.get_bind())
+    ver = data_version(session)
+    if _cache_version.get(key) != ver:
+        _cache.clear()
+        _cache_version[key] = ver
     if key not in _cache:
         _cache[key] = _build(session)
     return _cache[key]
 
 
 def clear_cache() -> None:
+    """Manual escape hatch. `_data` already self-invalidates on any DB change."""
     _cache.clear()
+    _cache_version.clear()
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
