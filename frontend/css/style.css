@@ -338,6 +338,40 @@ table.cmp tr:hover td { background: rgba(255,255,255,.02); }
 }
 .champ-stat-val { font-size: 18px; font-weight: 800; color: var(--text); }
 
+/* ── SVG charts (charts.js) ──────────────────────────────── */
+.chart-row {
+  display: grid; grid-template-columns: minmax(0, 560px) auto;
+  gap: 16px; align-items: start;
+}
+.chart-svg { width: 100%; height: auto; display: block; }
+.chart-aside { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
+.chart-toggle {
+  background: var(--bg3); border: 1px solid var(--border); color: var(--accent);
+  font: inherit; font-size: 11px; font-weight: 700; white-space: nowrap;
+  padding: 5px 12px; border-radius: 999px; cursor: pointer;
+  transition: border-color .15s;
+}
+.chart-toggle:hover { border-color: var(--accent); }
+.chart-side { width: 300px; max-width: 100%; }
+.chart-side.hidden { display: none; }
+.chart-side-table { width: 100%; font-size: 12px; }
+.chart-side-table th, .chart-side-table td { white-space: nowrap; padding: 6px 8px; }
+@media (max-width: 920px) {
+  .chart-row { grid-template-columns: 1fr; }
+  .chart-aside { align-items: stretch; }
+}
+.chart-dot { cursor: pointer; transition: r .1s ease; }
+.chart-dot:hover { r: 8; }
+.chart-tip {
+  position: fixed; z-index: 200; pointer-events: none;
+  background: var(--bg3); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: var(--shadow);
+  padding: 7px 10px; font-size: 12px; line-height: 1.45; color: var(--text);
+  white-space: nowrap;
+}
+.chart-tip.hidden { display: none; }
+.chart-tip strong { color: var(--accent); font-weight: 700; }
+
 .edge-list {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 8px;

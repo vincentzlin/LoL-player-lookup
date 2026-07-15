@@ -422,19 +422,6 @@ function whenAheadTable(pts) {
   return html + '</tbody></table>';
 }
 
-// Small 3-column table (label | win rate | adjusted WR) for the split sections.
-function splitTable(firstHead, rows) {
-  if (!rows.length) return '<div class="no-data">No games in this timeframe.</div>';
-  let html = `<table class="cmp"><thead><tr><th>${firstHead}</th><th>Games</th>` +
-    `<th>Win rate</th><th>Adjusted WR</th></tr></thead><tbody>`;
-  rows.forEach((r) => {
-    const pct = (v) => (v == null ? '—' : `${v.toFixed(1)}%`);
-    html += `<tr><td>${r.label}</td><td>${r.games}</td>` +
-      `<td class="val-strong">${pct(r.win_rate)}</td><td>${pct(r.adjusted_win_rate)}</td></tr>`;
-  });
-  return html + '</tbody></table>';
-}
-
 function renderChampRoleRow(d) {
   const row = $('champ-role-row');
   row.innerHTML = '';
@@ -464,12 +451,10 @@ function renderChampionGraph(d) {
     statChip('Gold diff @15', s.gd15 == null ? null : Math.round(s.gd15));
   renderChampRoleRow(d);
 
-  $('champ-duration').innerHTML = splitTable('Game length',
-    (s.duration_splits || []).map((x) => ({ label: `> ${x.min_minutes} min`, ...x })));
-  $('champ-dragons').innerHTML = splitTable('Dragons',
-    (s.dragon_splits || []).map((x) => ({ label: x.bucket, ...x })));
+  Charts.lineChart('champ-duration', s.duration_splits || []);
+  Charts.lollipopChart('champ-dragons', s.dragon_splits || []);
   $('champ-throwing').innerHTML = throwingBlock(s);
-  $('champ-whenahead').innerHTML = whenAheadTable(s.when_ahead);
+  Charts.scatterChart('champ-whenahead', s.when_ahead || []);
 
   // Selecting a new champion/role closes any open pairing detail.
   $('champ-pairing').classList.add('hidden');
