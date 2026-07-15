@@ -214,6 +214,11 @@ class ChampionStats(BaseModel):
     throw_rate: float | None = None        # throw_count / swing_games %
     avg_throw_size: float | None = None    # avg gold surrendered in throw games
     when_ahead: list[WhenAheadPoint] = []  # gold/xp lead needed for 50% WR @15/20/25
+    # Meaningful lead: mean % of the game (5:00 → end) the champion held ≥5% more total
+    # gold than their LANE OPPONENT. Sourced from the lolesports feed, so `lead_games` —
+    # the real denominator — is ≤ `games`; only resolved games carry a gold curve.
+    lead_games: int = 0
+    meaningful_lead_pct: float | None = None
     duration_splits: list[DurationSplit] = []
     dragon_splits: list[DragonSplit] = []
 

@@ -38,6 +38,10 @@ class PlayerGameStat(Base):
     # Final champion level. Not in Oracle's Elixir; populated by the same
     # lolesports enrichment step (NULL until/unless the game is resolved).
     level = Column(Integer)
+    # % of the game (5:00 → end) this champion held a "meaningful lead" — ≥5% more total
+    # gold than their lane opponent. Oracle only has 15/20/25 snapshots, so this comes
+    # from `enrich_lolesports --gold` (NULL until/unless the game is resolved).
+    meaningful_lead_pct = Column(Float)
     kills = Column(Integer, default=0)
     deaths = Column(Integer, default=0)
     assists = Column(Integer, default=0)
@@ -87,6 +91,7 @@ _ADDED_COLUMNS = {
     "item2_completed_s": "INTEGER",
     "item3_completed_s": "INTEGER",
     "level": "INTEGER",
+    "meaningful_lead_pct": "REAL",
 }
 
 
@@ -107,6 +112,17 @@ def init_db(engine=None) -> None:
         session.execute(text("PRAGMA journal_mode=WAL"))
         _add_missing_columns(session)
         session.commit()
+
+
+def data_version(session: Session) -> int:
+    """SQLite's per-connection change counter.
+
+    Bumps whenever *another* connection commits, so a long-lived reader can tell that the
+    DB changed underneath it. Cheap (no I/O). The offline backfills
+    (`backend.enrich_lolesports`) write to the live DB, so the API's in-memory caches use
+    this to know when to rebuild rather than serve pre-backfill data forever.
+    """
+    return session.execute(text("PRAGMA data_version")).scalar()
 
 
 _engine = None

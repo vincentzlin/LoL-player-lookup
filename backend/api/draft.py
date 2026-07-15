@@ -22,7 +22,7 @@ import numpy as np
 from sqlalchemy.orm import Session
 
 from backend.config import SEASONS, ROLE_LABELS
-from backend.database import PlayerGameStat
+from backend.database import PlayerGameStat, data_version
 from backend.champions import image_url
 
 # ── Tunable constants ─────────────────────────────────────────────────────────
@@ -34,6 +34,7 @@ TOP_N = 8               # default ranking length per category
 DURATION_MINUTES = [25, 30, 35]   # cumulative ">N min" win-rate splits
 AHEAD_MINUTES = [15, 20, 25]      # "When Ahead" break-even checkpoints
 MIN_AHEAD_GAMES = 20    # min games (with data) to estimate a break-even lead
+MIN_LEAD_GAMES = 3      # min games (with gold-curve data) to report a meaningful lead %
 
 _ROLES = ["top", "jng", "mid", "bot", "sup"]
 
@@ -45,6 +46,7 @@ class GameRec(NamedTuple):
     dur_s: int | None              # game length in seconds
     dragons: int | None            # focal team's dragon total
     gd15: float | None             # focal champion's gold diff @15 (nullable)
+    lead_pct: float | None         # % of game (5:00→end) with ≥5% gold over the lane opponent
     gd20: float | None             # gold diff @20 (null <20min)
     gd25: float | None             # gold diff @25 (null <25min)
     xp15: float | None             # xp diff @15
@@ -58,6 +60,8 @@ class GameRec(NamedTuple):
 
 # (id(engine), season, split) -> built edge dict
 _edge_cache: dict = {}
+# id(engine) -> the SQLite data_version the cache was built at (see build_edges)
+_cache_version: dict = {}
 
 
 # ── Team strength (skill-gap adjustment) ──────────────────────────────────────
@@ -163,7 +167,8 @@ def _build(session: Session, season, split) -> dict:
                     continue
                 records[(r.champion, r.position)].append(GameRec(
                     margin=margin, won=won, dur_s=r.gamelength_s, dragons=r.dragons,
-                    gd15=r.golddiffat15, gd20=r.golddiffat20, gd25=r.golddiffat25,
+                    gd15=r.golddiffat15, lead_pct=r.meaningful_lead_pct,
+                    gd20=r.golddiffat20, gd25=r.golddiffat25,
                     xp15=r.xpdiffat15, xp20=r.xpdiffat20, xp25=r.xpdiffat25,
                     tgd15=tgd["15"], tgd20=tgd["20"], tgd25=tgd["25"],
                     teammates=champs - {r.champion}, opponents=opponents))
@@ -172,15 +177,29 @@ def _build(session: Session, season, split) -> dict:
 
 
 def build_edges(session: Session, season=None, split=None) -> dict:
-    """Built (and cached) edge maps for a timeframe."""
-    key = (id(session.get_bind()), season, split)
+    """Built (and cached) edge maps for a timeframe.
+
+    The whole cache is dropped whenever the DB changed under us. `enrich_lolesports`
+    writes to the *live* DB, so a process-lifetime cache would otherwise keep serving
+    pre-backfill stats until the server restarted — with no error to notice. A version
+    change makes every entry suspect, so clear all rather than key on it (which would
+    leave dead entries around forever). Data changes are rare: the rebuild is paid once.
+    """
+    bind = id(session.get_bind())
+    ver = data_version(session)
+    if _cache_version.get(bind) != ver:
+        _edge_cache.clear()
+        _cache_version[bind] = ver
+    key = (bind, season, split)
     if key not in _edge_cache:
         _edge_cache[key] = _build(session, season, split)
     return _edge_cache[key]
 
 
 def clear_cache() -> None:
+    """Manual escape hatch. `build_edges` already self-invalidates on any DB change."""
     _edge_cache.clear()
+    _cache_version.clear()
 
 
 def _weight(total: float, n: int) -> float:
@@ -396,6 +415,21 @@ def _when_ahead(recs: list[GameRec]) -> list[dict]:
     return out
 
 
+def _meaningful_lead(recs: list[GameRec]) -> dict:
+    """Mean share of the game (5:00 → end) spent ≥5% up on gold vs the lane opponent.
+
+    A plain mean of a bounded per-game percentage, so unlike ``_when_ahead`` (an IRLS
+    logistic fit, hence MIN_AHEAD_GAMES=20) it is stable on small samples — the gate only
+    suppresses 1-2 game noise. ``lead_games`` is the real denominator and can sit far
+    below ``games``: only lolesports-resolved games carry a gold curve.
+    """
+    vals = [r.lead_pct for r in recs if r.lead_pct is not None]
+    if len(vals) < MIN_LEAD_GAMES:
+        return {"lead_games": len(vals), "meaningful_lead_pct": None}
+    return {"lead_games": len(vals),
+            "meaningful_lead_pct": round(sum(vals) / len(vals), 1)}
+
+
 def _aggregate(recs: list[GameRec]) -> dict:
     """Full champion stat block (overall + duration/dragon splits + GD@15)."""
     gd = [r.gd15 for r in recs if r.gd15 is not None]
@@ -415,6 +449,7 @@ def _aggregate(recs: list[GameRec]) -> dict:
                for b in _DRAGON_ORDER if b in by_bucket]
 
     return {**_split(recs), "gd15": gd15, **_throwing(recs),
+            **_meaningful_lead(recs),
             "when_ahead": _when_ahead(recs),
             "duration_splits": duration, "dragon_splits": dragons}
 

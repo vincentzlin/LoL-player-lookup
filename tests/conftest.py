@@ -97,9 +97,11 @@ def _tier_streak_rows():
 
 def _draft_stat(gameid, side, team, pos, champ, result, split="Spring",
                 gamelength_s=1800, dragons=None, golddiffat15=None, golddiffat20=None,
-                golddiffat25=None, xpdiffat15=None, xpdiffat20=None, xpdiffat25=None):
+                golddiffat25=None, xpdiffat15=None, xpdiffat20=None, xpdiffat25=None,
+                meaningful_lead_pct=None):
     """A full-game roster row for the draft-graph tests (carries side + result)."""
     return PlayerGameStat(
+        meaningful_lead_pct=meaningful_lead_pct,
         gameid=gameid, league="LCK", year=2024, split=split, playoffs=False,
         date="2024-02-01", playername=f"{team}_{pos}", teamname=team, side=side,
         position=pos, champion=champ, champion_ddragon=to_ddragon_id(champ),
@@ -132,7 +134,24 @@ def _draft_rows():
         for pos, champ in _BRAVO:
             rows.append(_draft_stat(gid, "Red", "Bravo", pos, champ, "Loss"))
     return (rows + _strong_team_rows() + _multi_role_rows() + _cait_rows()
-            + _when_ahead_rows())
+            + _when_ahead_rows() + _meaningful_lead_rows())
+
+
+def _meaningful_lead_rows():
+    """Ziggs (mid) for the Meaningful Lead tests, 2024 'Lead'.
+
+    5 games with lead pcts 80/60/40/20/None → mean 50.0 over the 4 with data. The NULL
+    game (an unresolved lolesports game) proves the denominator is the with-data count,
+    not games played. Zilean is the lane opponent in every game, so the pairing subset
+    is the full set.
+    """
+    rows = []
+    for i, pct in enumerate([80.0, 60.0, 40.0, 20.0, None]):
+        rows.append(_draft_stat(f"ml{i}", "Blue", "ML", "mid", "Ziggs", "Win",
+                                split="Lead", meaningful_lead_pct=pct))
+        rows.append(_draft_stat(f"ml{i}", "Red", f"MLO_{i}", "mid", "Zilean", "Loss",
+                                split="Lead"))
+    return rows
 
 
 def _when_ahead_rows():
