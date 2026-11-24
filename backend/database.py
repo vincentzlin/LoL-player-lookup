@@ -1,11 +1,11 @@
 """SQLAlchemy models, engine and session helpers (mirrors sibling project)."""
 from sqlalchemy import (
-    create_engine, Column, String, Float, Integer, Boolean, Index, text,
+    create_engine, inspect, Column, String, Float, Integer, Boolean, Index, text,
 )
 from sqlalchemy.orm import DeclarativeBase, Session
 from sqlalchemy.pool import StaticPool
 
-from backend.config import DB_PATH
+from backend.config import DB_PATH, DATABASE_URL
 
 
 class Base(DeclarativeBase):
@@ -76,12 +76,24 @@ Index("ix_pgs_champ_time", PlayerGameStat.league, PlayerGameStat.position,
       PlayerGameStat.champion, PlayerGameStat.year, PlayerGameStat.split)
 
 
-def get_engine(db_path: str = DB_PATH):
+def get_engine(db_path: str = DB_PATH, url: str | None = None):
+    """Engine for ``url`` (or ``DATABASE_URL``), falling back to local SQLite at ``db_path``.
+
+    An explicit ``db_path`` argument always wins over ``DATABASE_URL`` so callers that
+    pass a path (tests, the RDS copy script's source) get SQLite.
+    """
+    url = url or (DATABASE_URL if db_path == DB_PATH else None)
+    if url and not url.startswith("sqlite"):
+        return create_engine(url, pool_pre_ping=True, pool_size=5, max_overflow=5)
     return create_engine(
-        f"sqlite:///{db_path}",
+        url or f"sqlite:///{db_path}",
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
+
+
+def _is_sqlite(bind) -> bool:
+    return bind.dialect.name == "sqlite"
 
 
 # Columns added after the table first shipped. `create_all` won't ALTER an existing
@@ -96,10 +108,12 @@ _ADDED_COLUMNS = {
 
 
 def _add_missing_columns(session: Session) -> None:
-    existing = {row[1] for row in session.execute(
-        text("PRAGMA table_info(player_game_stats)"))}
+    existing = {c["name"] for c in inspect(session.connection()).get_columns(
+        PlayerGameStat.__tablename__)}
     for col, sqltype in _ADDED_COLUMNS.items():
         if col not in existing:
+            sqltype = "DOUBLE PRECISION" if (sqltype == "REAL" and
+                                             not _is_sqlite(session.bind)) else sqltype
             session.execute(
                 text(f"ALTER TABLE player_game_stats ADD COLUMN {col} {sqltype}"))
 
@@ -109,7 +123,8 @@ def init_db(engine=None) -> None:
         engine = get_engine()
     Base.metadata.create_all(engine)
     with Session(engine) as session:
-        session.execute(text("PRAGMA journal_mode=WAL"))
+        if _is_sqlite(engine):
+            session.execute(text("PRAGMA journal_mode=WAL"))
         _add_missing_columns(session)
         session.commit()
 
@@ -121,7 +136,12 @@ def data_version(session: Session) -> int:
     DB changed underneath it. Cheap (no I/O). The offline backfills
     (`backend.enrich_lolesports`) write to the live DB, so the API's in-memory caches use
     this to know when to rebuild rather than serve pre-backfill data forever.
+
+    Non-SQLite databases (RDS) have no equivalent, so this returns a constant: caches are
+    built once per process. Restart the app after reloading data there.
     """
+    if not _is_sqlite(session.bind):
+        return 0
     return session.execute(text("PRAGMA data_version")).scalar()
 
 
