@@ -1,4 +1,5 @@
 """Project configuration for the LoL pro-player stats query app."""
+import os
 from pathlib import Path
 
 # ── Paths ────────────────────────────────────────────────────────────────────
@@ -6,6 +7,10 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT_DIR / "data"
 RAW_DIR = DATA_DIR / "raw"
 DB_PATH = str(DATA_DIR / "lol_performance.db")
+
+# Optional SQLAlchemy URL for an external database (e.g. Amazon RDS PostgreSQL:
+# "postgresql+psycopg://user:pass@host:5432/dbname"). Unset → local SQLite at DB_PATH.
+DATABASE_URL = os.environ.get("DATABASE_URL") or None
 
 # ── Scope ────────────────────────────────────────────────────────────────────
 # Only LCK pro-play data is loaded and compared.
